@@ -33,11 +33,14 @@ body {
 }
 
 .site-logo {
-  font-size: 1.2rem;
-  font-weight: 800;
-  color: #213F91;
   text-decoration: none;
-  letter-spacing: -0.5px;
+  display: flex;
+  align-items: center;
+}
+
+.site-logo img {
+  height: 40px;
+  width: auto;
 }
 
 .site-nav {
