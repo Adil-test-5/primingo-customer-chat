@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getSession, saveSession } = require('./chatwoot');
+const { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getMessages, getSession, saveSession } = require('./chatwoot');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -114,6 +114,32 @@ app.post('/api/messages/send', async (req, res) => {
     res.json({ status: 'ok', message_id: result.id, conversation_id: conversationId });
   } catch (err) {
     res.status(502).json({ status: 'error', message: 'Failed to send message. Please try again.' });
+  }
+});
+
+app.get('/api/messages/history', async (req, res) => {
+  const { customer_email } = req.query;
+
+  if (!customer_email) {
+    return res.status(400).json({ status: 'error', message: 'Session not verified.' });
+  }
+
+  const session = getSession(customer_email);
+  if (!session?.conversation_id) {
+    return res.json({ status: 'ok', messages: [] });
+  }
+
+  const cwBase = process.env.CHATWOOT_BASE_URL;
+  const cwToken = process.env.CHATWOOT_API_TOKEN;
+  if (!cwBase || !cwToken) {
+    return res.status(500).json({ status: 'error', message: 'Chat service not configured.' });
+  }
+
+  try {
+    const messages = await getMessages(session.conversation_id);
+    res.json({ status: 'ok', messages });
+  } catch (err) {
+    res.status(502).json({ status: 'error', message: 'Failed to load messages.' });
   }
 });
 

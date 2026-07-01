@@ -10,6 +10,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const type = params.get('type');
 
   let sessionData = null;
+  let knownMessageIds = new Set();
+  let pollInterval = null;
 
   const setStatus = (text, isError) => {
     messagesArea.innerHTML = `<div class="system-message ${isError ? 'error' : ''}">${text}</div>`;
@@ -33,19 +35,78 @@ document.addEventListener('DOMContentLoaded', async () => {
     sendBtn.disabled = false;
   };
 
-  const addMessage = (text, status) => {
-    const existing = messagesArea.querySelector('.order-info');
-    if (!existing && messagesArea.querySelector('.system-message')) {
-      messagesArea.innerHTML = '';
-    }
+  const clearMessages = () => {
+    messagesArea.querySelectorAll('.chat-message, .system-message').forEach(el => {
+      if (!el.closest('.order-info')) el.remove();
+    });
+    messagesArea.style.alignItems = 'flex-start';
+  };
+
+  const renderMessages = (messages) => {
+    const pendingEls = messagesArea.querySelectorAll('.chat-message[data-pending]');
+    const pendingTexts = new Set();
+    pendingEls.forEach(el => {
+      pendingTexts.add(el.querySelector('.msg-text').textContent);
+    });
+
+    messages.forEach(msg => {
+      if (knownMessageIds.has(msg.id)) return;
+      knownMessageIds.add(msg.id);
+
+      if (msg.sender === 'customer' && pendingTexts.has(msg.content)) {
+        const match = [...pendingEls].find(el =>
+          el.querySelector('.msg-text').textContent === msg.content
+        );
+        if (match) {
+          match.removeAttribute('data-pending');
+          match.dataset.id = msg.id;
+          const statusEl = match.querySelector('.msg-status');
+          statusEl.className = 'msg-status sent';
+          statusEl.textContent = 'sent';
+          const retryBtn = match.querySelector('.retry-btn');
+          if (retryBtn) retryBtn.remove();
+          pendingTexts.delete(msg.content);
+          return;
+        }
+      }
+
+      const msgEl = document.createElement('div');
+      msgEl.className = `chat-message ${msg.sender}`;
+      msgEl.dataset.id = msg.id;
+      msgEl.innerHTML = `<div class="msg-text">${msg.content}</div>`;
+      messagesArea.appendChild(msgEl);
+    });
+
+    messagesArea.scrollTop = messagesArea.scrollHeight;
+  };
+
+  const loadHistory = async () => {
+    if (!sessionData?.customer_email) return;
+
+    try {
+      const res = await fetch(`/api/messages/history?customer_email=${encodeURIComponent(sessionData.customer_email)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.messages?.length) {
+        renderMessages(data.messages);
+      }
+    } catch (err) {}
+  };
+
+  const startPolling = () => {
+    pollInterval = setInterval(loadHistory, 5000);
+  };
+
+  const addMessage = (text) => {
+    clearMessages();
 
     const msgEl = document.createElement('div');
-    msgEl.className = 'chat-message';
+    msgEl.className = 'chat-message customer';
+    msgEl.setAttribute('data-pending', 'true');
     msgEl.innerHTML = `
       <div class="msg-text">${text}</div>
-      <div class="msg-status ${status}">${status}</div>`;
+      <div class="msg-status sending">sending</div>`;
     messagesArea.appendChild(msgEl);
-    messagesArea.style.alignItems = 'flex-start';
     messagesArea.scrollTop = messagesArea.scrollHeight;
     return msgEl;
   };
@@ -103,7 +164,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!text) return;
 
     messageInput.value = '';
-    const msgEl = addMessage(text, 'sending');
+    const msgEl = addMessage(text);
     sendMessageToServer(msgEl, text);
   };
 
@@ -143,11 +204,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (data.session_type === 'general') {
       contextInfo.textContent = 'General Support';
       messagesArea.innerHTML = '';
+      messagesArea.style.alignItems = 'flex-start';
       enableChat();
+      await loadHistory();
+      startPolling();
     } else if (data.session_type === 'order') {
       contextInfo.textContent = `${data.customer_name} — Order #${data.order_id}`;
       showOrderInfo(data);
       enableChat();
+      await loadHistory();
+      startPolling();
     }
   } catch (err) {
     setStatus('Unable to connect. Please try again later.', true);

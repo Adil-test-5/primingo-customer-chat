@@ -119,4 +119,27 @@ async function sendMessage(conversationId, content) {
   return res.json();
 }
 
-module.exports = { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getSession, saveSession };
+async function getMessages(conversationId) {
+  const res = await fetch(apiUrl(`/conversations/${conversationId}/messages`), {
+    headers: headers()
+  });
+
+  if (!res.ok) {
+    throw new Error('Failed to fetch messages from Chatwoot');
+  }
+
+  const data = await res.json();
+  const messages = data.payload || [];
+
+  return messages
+    .filter(m => !m.private)
+    .filter(m => !m.content?.startsWith('--- Order Context ---'))
+    .map(m => ({
+      id: m.id,
+      content: m.content,
+      sender: m.message_type === 'incoming' ? 'customer' : 'admin',
+      created_at: m.created_at
+    }));
+}
+
+module.exports = { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getMessages, getSession, saveSession };

@@ -51,6 +51,7 @@ body {
   padding: 20px;
   overflow-y: auto;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
 }
@@ -143,6 +144,13 @@ body {
   margin-bottom: 8px;
   max-width: 80%;
   word-wrap: break-word;
+}
+
+.chat-message.admin {
+  align-self: flex-start;
+  background: #f0f0f0;
+  color: #333;
+  border-radius: 12px 12px 12px 4px;
 }
 
 .msg-status {
