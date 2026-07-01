@@ -52,6 +52,25 @@ async function findOrCreateConversation(contactId, email, orderContext) {
     return { conversationId: session.conversation_id, isNew: false };
   }
 
+  // Search for existing open conversations for this contact
+  const searchRes = await fetch(apiUrl(`/contacts/${contactId}/conversations`), {
+    headers: headers()
+  });
+
+  if (searchRes.ok) {
+    const searchData = await searchRes.json();
+    const conversations = searchData.payload || [];
+    const open = conversations.find(c => c.status === 'open' || c.status === 'pending');
+    if (open) {
+      saveSession(email, {
+        contact_id: contactId,
+        conversation_id: open.id,
+        order_context_sent: true
+      });
+      return { conversationId: open.id, isNew: false };
+    }
+  }
+
   const createRes = await fetch(apiUrl('/conversations'), {
     method: 'POST',
     headers: headers(),

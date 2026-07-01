@@ -7,20 +7,24 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="chat-container">
-    <div class="chat-header">
-      <h1>Primingo Support Chat</h1>
-      <p id="context-info"></p>
-    </div>
-    <div id="order-card" class="order-card hidden"></div>
-    <div class="chat-body">
+  <div class="app-layout">
+    <div class="chat-panel">
+      <div class="chat-header">
+        <h1>Primingo Support Chat</h1>
+        <p id="context-info"></p>
+      </div>
       <div class="chat-messages" id="messages"></div>
       <div class="chat-composer">
         <input type="text" id="message-input" placeholder="Type your message..." disabled>
         <button id="send-btn" disabled>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
         </button>
       </div>
+    </div>
+    <div class="order-panel hidden" id="order-panel">
+      <div class="order-panel-header">Selected Order</div>
+      <div class="order-panel-body" id="order-panel-body"></div>
+      <button class="renew-btn" disabled>Renew</button>
     </div>
   </div>
   <script src="/app.js"></script>

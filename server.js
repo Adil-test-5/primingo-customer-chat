@@ -124,15 +124,27 @@ app.get('/api/messages/history', async (req, res) => {
     return res.status(400).json({ status: 'error', message: 'Session not verified.' });
   }
 
-  const session = getSession(customer_email);
-  if (!session?.conversation_id) {
-    return res.json({ status: 'ok', messages: [] });
-  }
-
   const cwBase = process.env.CHATWOOT_BASE_URL;
   const cwToken = process.env.CHATWOOT_API_TOKEN;
   if (!cwBase || !cwToken) {
-    return res.status(500).json({ status: 'error', message: 'Chat service not configured.' });
+    return res.json({ status: 'ok', messages: [] });
+  }
+
+  let session = getSession(customer_email);
+
+  // If no local session, try to find contact and conversation from Chatwoot
+  if (!session?.conversation_id) {
+    try {
+      const contactId = await findOrCreateContact(customer_email, 'Customer');
+      const { conversationId } = await findOrCreateConversation(contactId, customer_email);
+      session = getSession(customer_email);
+    } catch (err) {
+      return res.json({ status: 'ok', messages: [] });
+    }
+  }
+
+  if (!session?.conversation_id) {
+    return res.json({ status: 'ok', messages: [] });
   }
 
   try {

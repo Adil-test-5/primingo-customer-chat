@@ -1,7 +1,8 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
   const contextInfo = document.getElementById('context-info');
-  const orderCard = document.getElementById('order-card');
+  const orderPanel = document.getElementById('order-panel');
+  const orderPanelBody = document.getElementById('order-panel-body');
   const messagesArea = document.getElementById('messages');
   const messageInput = document.getElementById('message-input');
   const sendBtn = document.getElementById('send-btn');
@@ -17,21 +18,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   let isProcessingQueue = false;
   let pollInterval = null;
 
-  const TICK_SENT = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M2 12l5 5L20 5"/><path d="M7 12l5 5L22 7"/></svg>';
-  const TICK_PENDING = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5L20 5"/></svg>';
-  const TICK_FAILED = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>';
+  const TICK_SENT = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M2 12l5 5L12 12"/><path d="M8 12l5 5L22 7"/></svg>';
+  const TICK_PENDING = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 5"/></svg>';
+  const TICK_FAILED = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>';
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
 
   function showNotice(text, isError) {
     messagesArea.innerHTML = `<div class="system-notice ${isError ? 'error' : ''}">${text}</div>`;
   }
 
-  function showOrderCard(data) {
-    orderCard.classList.remove('hidden');
-    orderCard.innerHTML = `
-      <span class="order-tag"><strong>${data.product}</strong></span>
-      <span class="order-tag">Plan: <strong>${data.plan}</strong></span>
-      <span class="order-tag">Status: <strong>${data.order_status}</strong></span>
-      <span class="order-tag">Expires: <strong>${data.expiry_date}</strong> (${data.days_left}d)</span>`;
+  function showOrderPanel(data) {
+    orderPanel.classList.remove('hidden');
+    orderPanelBody.innerHTML = `
+      <div class="order-row"><span class="label">Product</span><span class="value">${escapeHtml(data.product)}</span></div>
+      <div class="order-row"><span class="label">Plan</span><span class="value">${escapeHtml(data.plan)}</span></div>
+      <div class="order-row"><span class="label">Status</span><span class="value status">${escapeHtml(data.order_status)}</span></div>
+      <div class="order-row"><span class="label">Purchased</span><span class="value">${escapeHtml(data.purchase_date)}</span></div>
+      <div class="order-row"><span class="label">Expires</span><span class="value">${escapeHtml(data.expiry_date)}</span></div>
+      <div class="order-row"><span class="label">Days Left</span><span class="value">${data.days_left}</span></div>`;
   }
 
   function enableChat() {
@@ -48,8 +57,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   function renderAllMessages() {
     messagesArea.innerHTML = '';
     localMessages.forEach(msg => {
-      const el = createBubble(msg);
-      messagesArea.appendChild(el);
+      messagesArea.appendChild(createBubble(msg));
     });
     scrollToBottom();
   }
@@ -57,12 +65,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   function createBubble(msg) {
     const el = document.createElement('div');
     el.className = `msg-bubble ${msg.sender}`;
-    el.dataset.localId = msg.localId || '';
 
     let metaHtml = '';
-    if (msg.sender === 'customer') {
-      let tickClass = msg.status || 'sent';
-      let tickSvg = tickClass === 'sent' ? TICK_SENT : tickClass === 'failed' ? TICK_FAILED : TICK_PENDING;
+    if (msg.sender === 'customer' && msg.status) {
+      const tickClass = msg.status;
+      const tickSvg = msg.status === 'sent' ? TICK_SENT : msg.status === 'failed' ? TICK_FAILED : TICK_PENDING;
       metaHtml = `<div class="msg-meta"><span class="msg-tick ${tickClass}">${tickSvg}</span>`;
       if (msg.status === 'failed') {
         metaHtml += `<button class="retry-btn" data-local-id="${msg.localId}">Retry</button>`;
@@ -72,12 +79,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     el.innerHTML = `<div class="msg-text">${escapeHtml(msg.content)}</div>${metaHtml}`;
     return el;
-  }
-
-  function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
   }
 
   function addLocalMessage(text) {
@@ -124,15 +125,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (res.ok) {
           const data = await res.json();
           updateLocalMessageStatus(item.localId, 'sent', data.message_id);
-          messageQueue.shift();
         } else {
           updateLocalMessageStatus(item.localId, 'failed');
-          messageQueue.shift();
         }
       } catch (err) {
         updateLocalMessageStatus(item.localId, 'failed');
-        messageQueue.shift();
       }
+
+      messageQueue.shift();
     }
 
     isProcessingQueue = false;
@@ -155,7 +155,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   function handleSend() {
     const text = messageInput.value.trim();
     if (!text) return;
-
     messageInput.value = '';
     const msg = addLocalMessage(text);
     messageQueue.push({ localId: msg.localId, content: msg.content });
@@ -181,9 +180,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       data.messages.forEach(serverMsg => {
         if (knownServerIds.has(serverMsg.id)) return;
 
+        // Check if this is a customer message that matches an optimistic local message
         if (serverMsg.sender === 'customer') {
           const match = localMessages.find(m =>
-            m.sender === 'customer' && !m.serverId && m.content === serverMsg.content
+            m.sender === 'customer' &&
+            !m.serverId &&
+            m.content === serverMsg.content
           );
           if (match) {
             match.serverId = serverMsg.id;
@@ -199,7 +201,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           localId: 'server_' + serverMsg.id,
           content: serverMsg.content,
           sender: serverMsg.sender,
-          status: 'sent',
+          status: serverMsg.sender === 'customer' ? 'sent' : undefined,
           serverId: serverMsg.id,
           created_at: serverMsg.created_at
         });
@@ -207,13 +209,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
 
       if (changed) {
+        // Sort: server messages by created_at, local pending messages stay at end
         localMessages.sort((a, b) => {
-          const aTime = a.created_at || 0;
-          const bTime = b.created_at || 0;
-          if (aTime && bTime) return aTime - bTime;
-          if (aTime) return -1;
-          if (bTime) return 1;
-          return 0;
+          const aTime = a.created_at || Infinity;
+          const bTime = b.created_at || Infinity;
+          return aTime - bTime;
         });
         renderAllMessages();
       }
@@ -224,6 +224,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     pollInterval = setInterval(loadHistory, 5000);
   }
 
+  // --- Init ---
   showNotice('Verifying session...');
 
   const body = {};
@@ -260,7 +261,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       startPolling();
     } else if (data.session_type === 'order') {
       contextInfo.textContent = `${data.customer_name} — Order #${data.order_id}`;
-      showOrderCard(data);
+      showOrderPanel(data);
       messagesArea.innerHTML = '';
       enableChat();
       await loadHistory();
