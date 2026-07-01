@@ -16,7 +16,7 @@ app.get('/order-chat', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.post('/api/session/verify', (req, res) => {
+app.post('/api/session/verify', async (req, res) => {
   const { type, order_id, item_id, chat_token } = req.body;
 
   if (type === 'general') {
@@ -34,11 +34,45 @@ app.post('/api/session/verify', (req, res) => {
     });
   }
 
-  // TODO: Call WordPress to verify session
-  // const wpUrl = `${process.env.WORDPRESS_BASE_URL}/wp-json/primingo-chat/v1/verify-session`;
-  // Will send { order_id, item_id, chat_token } to WordPress for validation
+  const wpBaseUrl = process.env.WORDPRESS_BASE_URL;
+  if (!wpBaseUrl) {
+    return res.status(500).json({ status: 'error', message: 'Service configuration error. Please try again later.' });
+  }
 
-  res.json({ status: 'ok', session_type: 'order', order_id, item_id });
+  try {
+    const wpRes = await fetch(`${wpBaseUrl}/wp-json/primingo-chat/v1/verify-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id, item_id, chat_token })
+    });
+
+    if (!wpRes.ok) {
+      const wpError = await wpRes.json().catch(() => null);
+      const message = wpError?.message || 'Session verification failed. Please try again from Primingo My Products.';
+      return res.status(wpRes.status).json({ status: 'error', message });
+    }
+
+    const wpData = await wpRes.json();
+
+    const safeData = {
+      status: 'ok',
+      session_type: 'order',
+      customer_name: wpData.customer_name,
+      customer_email: wpData.customer_email,
+      order_id: wpData.order_id,
+      item_id: wpData.item_id,
+      product: wpData.product,
+      plan: wpData.plan,
+      order_status: wpData.status,
+      purchase_date: wpData.purchase_date,
+      expiry_date: wpData.expiry_date,
+      days_left: wpData.days_left
+    };
+
+    res.json(safeData);
+  } catch (err) {
+    res.status(502).json({ status: 'error', message: 'Unable to verify session. Please try again later.' });
+  }
 });
 
 app.get('/health', (req, res) => {

@@ -11,6 +11,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     messagesArea.innerHTML = `<div class="system-message ${isError ? 'error' : ''}">${text}</div>`;
   };
 
+  const showOrderInfo = (data) => {
+    messagesArea.innerHTML = `
+      <div class="order-info">
+        <div class="order-info-row"><span>Product</span><span>${data.product}</span></div>
+        <div class="order-info-row"><span>Plan</span><span>${data.plan}</span></div>
+        <div class="order-info-row"><span>Status</span><span class="badge">${data.order_status}</span></div>
+        <div class="order-info-row"><span>Purchased</span><span>${data.purchase_date}</span></div>
+        <div class="order-info-row"><span>Expires</span><span>${data.expiry_date}</span></div>
+        <div class="order-info-row"><span>Days left</span><span>${data.days_left}</span></div>
+        <div class="system-message" style="margin-top: 16px;">Chat system is being prepared</div>
+      </div>`;
+  };
+
   setStatus('Verifying session...');
 
   const body = {};
@@ -39,11 +52,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (data.session_type === 'general') {
       contextInfo.textContent = 'General Support';
+      setStatus('Chat system is being prepared');
     } else if (data.session_type === 'order') {
-      contextInfo.textContent = `Order #${data.order_id} — Item #${data.item_id}`;
+      contextInfo.textContent = `${data.customer_name} — Order #${data.order_id}`;
+      showOrderInfo(data);
     }
-
-    setStatus('Chat system is being prepared');
   } catch (err) {
     setStatus('Unable to connect. Please try again later.', true);
   }

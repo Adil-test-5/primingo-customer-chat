@@ -69,6 +69,36 @@ body {
   background: #fdecea;
 }
 
+.order-info {
+  width: 100%;
+  padding: 0 4px;
+}
+
+.order-info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 0.9rem;
+}
+
+.order-info-row span:first-child {
+  color: #888;
+}
+
+.order-info-row span:last-child {
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+.badge {
+  background: #e8f5e9;
+  color: #2e7d32;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
 .chat-input {
   display: flex;
   padding: 12px;
