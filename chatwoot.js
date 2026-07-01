@@ -1,0 +1,122 @@
+const { getSession, saveSession } = require('./sessions');
+
+const CHATWOOT_BASE_URL = () => process.env.CHATWOOT_BASE_URL;
+const CHATWOOT_API_TOKEN = () => process.env.CHATWOOT_API_TOKEN;
+const CHATWOOT_ACCOUNT_ID = () => process.env.CHATWOOT_ACCOUNT_ID || '1';
+const CHATWOOT_INBOX_ID = () => process.env.CHATWOOT_INBOX_ID || '2';
+
+function apiUrl(path) {
+  return `${CHATWOOT_BASE_URL()}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID()}${path}`;
+}
+
+function headers() {
+  return {
+    'Content-Type': 'application/json',
+    'api_access_token': CHATWOOT_API_TOKEN()
+  };
+}
+
+async function findOrCreateContact(email, name) {
+  const searchRes = await fetch(apiUrl(`/contacts/search?q=${encodeURIComponent(email)}`), {
+    headers: headers()
+  });
+
+  if (searchRes.ok) {
+    const searchData = await searchRes.json();
+    const existing = searchData.payload?.find(c => c.email === email);
+    if (existing) return existing.id;
+  }
+
+  const createRes = await fetch(apiUrl('/contacts'), {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      inbox_id: parseInt(CHATWOOT_INBOX_ID()),
+      name,
+      email
+    })
+  });
+
+  if (!createRes.ok) {
+    throw new Error('Failed to create Chatwoot contact');
+  }
+
+  const created = await createRes.json();
+  return created.payload?.contact?.id || created.id;
+}
+
+async function findOrCreateConversation(contactId, email, orderContext) {
+  const session = getSession(email);
+
+  if (session?.conversation_id) {
+    return { conversationId: session.conversation_id, isNew: false };
+  }
+
+  const createRes = await fetch(apiUrl('/conversations'), {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      inbox_id: parseInt(CHATWOOT_INBOX_ID()),
+      contact_id: contactId,
+      status: 'open'
+    })
+  });
+
+  if (!createRes.ok) {
+    throw new Error('Failed to create Chatwoot conversation');
+  }
+
+  const conv = await createRes.json();
+  const conversationId = conv.id;
+
+  saveSession(email, {
+    contact_id: contactId,
+    conversation_id: conversationId,
+    order_context_sent: false
+  });
+
+  return { conversationId, isNew: true };
+}
+
+async function sendOrderContext(conversationId, orderData) {
+  const contextMessage = [
+    `--- Order Context ---`,
+    `Product: ${orderData.product}`,
+    `Plan: ${orderData.plan}`,
+    `Order #${orderData.order_id} — Item #${orderData.item_id}`,
+    `Status: ${orderData.order_status}`,
+    `Purchased: ${orderData.purchase_date}`,
+    `Expires: ${orderData.expiry_date}`,
+    `Days left: ${orderData.days_left}`,
+    `---`
+  ].join('\n');
+
+  await fetch(apiUrl(`/conversations/${conversationId}/messages`), {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      content: contextMessage,
+      message_type: 'incoming',
+      private: false
+    })
+  });
+}
+
+async function sendMessage(conversationId, content) {
+  const res = await fetch(apiUrl(`/conversations/${conversationId}/messages`), {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      content,
+      message_type: 'incoming'
+    })
+  });
+
+  if (!res.ok) {
+    throw new Error('Failed to send message to Chatwoot');
+  }
+
+  return res.json();
+}
+
+module.exports = { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getSession, saveSession };

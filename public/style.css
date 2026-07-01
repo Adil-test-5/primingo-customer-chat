@@ -133,3 +133,44 @@ body {
   background: #ccc;
   cursor: not-allowed;
 }
+
+.chat-message {
+  align-self: flex-end;
+  background: #2c3e50;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 12px 12px 4px 12px;
+  margin-bottom: 8px;
+  max-width: 80%;
+  word-wrap: break-word;
+}
+
+.msg-status {
+  font-size: 0.75rem;
+  margin-top: 4px;
+  opacity: 0.7;
+}
+
+.msg-status.sending {
+  color: #ffd700;
+}
+
+.msg-status.sent {
+  color: #90ee90;
+}
+
+.msg-status.failed {
+  color: #ff6b6b;
+}
+
+.retry-btn {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 10px;
+  font-size: 0.75rem;
+  background: #ff6b6b;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}

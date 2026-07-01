@@ -1,0 +1,33 @@
+const fs = require('fs');
+const path = require('path');
+
+const SESSIONS_FILE = path.join(__dirname, 'data', 'sessions.json');
+
+function ensureDataDir() {
+  const dir = path.dirname(SESSIONS_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function loadSessions() {
+  ensureDataDir();
+  if (!fs.existsSync(SESSIONS_FILE)) return {};
+  return JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+}
+
+function saveSessions(data) {
+  ensureDataDir();
+  fs.writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
+}
+
+function getSession(email) {
+  const sessions = loadSessions();
+  return sessions[email] || null;
+}
+
+function saveSession(email, sessionData) {
+  const sessions = loadSessions();
+  sessions[email] = sessionData;
+  saveSessions(sessions);
+}
+
+module.exports = { getSession, saveSession };

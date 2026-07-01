@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
+const { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getSession, saveSession } = require('./chatwoot');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -77,6 +78,43 @@ app.post('/api/session/verify', async (req, res) => {
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.post('/api/messages/send', async (req, res) => {
+  const { message, session_type, customer_email, customer_name, order_data } = req.body;
+
+  if (!message || !message.trim()) {
+    return res.status(400).json({ status: 'error', message: 'Message cannot be empty.' });
+  }
+
+  if (!customer_email) {
+    return res.status(400).json({ status: 'error', message: 'Session not verified.' });
+  }
+
+  const cwBase = process.env.CHATWOOT_BASE_URL;
+  const cwToken = process.env.CHATWOOT_API_TOKEN;
+  if (!cwBase || !cwToken) {
+    return res.status(500).json({ status: 'error', message: 'Chat service not configured.' });
+  }
+
+  try {
+    const contactId = await findOrCreateContact(customer_email, customer_name || 'Customer');
+    const { conversationId, isNew } = await findOrCreateConversation(contactId, customer_email, order_data);
+
+    if (session_type === 'order' && order_data) {
+      const session = getSession(customer_email);
+      if (session && !session.order_context_sent) {
+        await sendOrderContext(conversationId, order_data);
+        saveSession(customer_email, { ...session, order_context_sent: true });
+      }
+    }
+
+    const result = await sendMessage(conversationId, message.trim());
+
+    res.json({ status: 'ok', message_id: result.id, conversation_id: conversationId });
+  } catch (err) {
+    res.status(502).json({ status: 'error', message: 'Failed to send message. Please try again.' });
+  }
 });
 
 app.listen(PORT, () => {
