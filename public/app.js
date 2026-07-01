@@ -1,8 +1,9 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
   const contextInfo = document.getElementById('context-info');
+  const orderBanner = document.getElementById('order-banner');
   const orderPanel = document.getElementById('order-panel');
-  const orderPanelBody = document.getElementById('order-panel-body');
+  const orderCardBody = document.getElementById('order-card-body');
   const messagesArea = document.getElementById('messages');
   const messageInput = document.getElementById('message-input');
   const sendBtn = document.getElementById('send-btn');
@@ -32,15 +33,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     messagesArea.innerHTML = `<div class="system-notice ${isError ? 'error' : ''}">${text}</div>`;
   }
 
+  function showOrderBanner(data) {
+    orderBanner.textContent = `Selected order: #${data.order_id} — ${data.product}`;
+    orderBanner.classList.remove('hidden');
+  }
+
   function showOrderPanel(data) {
     orderPanel.classList.remove('hidden');
-    orderPanelBody.innerHTML = `
+    orderCardBody.innerHTML = `
       <div class="order-product-name">${escapeHtml(data.product)}</div>
-      <div class="order-row"><span class="label">Plan</span><span class="value">${escapeHtml(data.plan)}</span></div>
-      <div class="order-row"><span class="label">Status</span><span class="status-pill">${escapeHtml(data.order_status)}</span></div>
-      <div class="order-row"><span class="label">Purchased</span><span class="value">${escapeHtml(data.purchase_date)}</span></div>
-      <div class="order-row"><span class="label">Expires</span><span class="value">${escapeHtml(data.expiry_date)}</span></div>
-      <div class="order-row"><span class="label">Days Left</span><span class="value">${data.days_left}</span></div>`;
+      <div class="order-detail-row"><span class="label">Plan</span><span class="value">${escapeHtml(data.plan)}</span></div>
+      <div class="order-detail-row"><span class="label">Order</span><span class="value">#${data.order_id}</span></div>
+      <div class="order-detail-row"><span class="label">Item</span><span class="value">#${data.item_id}</span></div>
+      <div class="order-detail-row"><span class="label">Status</span><span class="status-pill">${escapeHtml(data.order_status)}</span></div>
+      <div class="order-detail-row"><span class="label">Purchased</span><span class="value">${escapeHtml(data.purchase_date)}</span></div>
+      <div class="order-detail-row"><span class="label">Expires</span><span class="value">${escapeHtml(data.expiry_date)}</span></div>
+      <div class="order-detail-row"><span class="label">Days Left</span><span class="value">${data.days_left}</span></div>`;
 
     document.getElementById('btn-send-order').addEventListener('click', () => {
       const contextText = [
@@ -89,9 +97,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     let metaHtml = '';
     if (msg.sender === 'customer' && msg.status) {
-      const tickClass = msg.status;
       const tickSvg = msg.status === 'sent' ? TICK_SENT : msg.status === 'failed' ? TICK_FAILED : TICK_PENDING;
-      metaHtml = `<div class="msg-meta"><span class="msg-tick ${tickClass}">${tickSvg}</span>`;
+      metaHtml = `<div class="msg-meta"><span class="msg-tick ${msg.status}">${tickSvg}</span>`;
       if (msg.status === 'failed') {
         metaHtml += `<button class="retry-btn" data-local-id="${msg.localId}">Retry</button>`;
       }
@@ -201,7 +208,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       data.messages.forEach(serverMsg => {
         if (knownServerIds.has(serverMsg.id)) return;
 
-        // Check if this is a customer message that matches an optimistic local message
         if (serverMsg.sender === 'customer') {
           const match = localMessages.find(m =>
             m.sender === 'customer' &&
@@ -230,7 +236,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
 
       if (changed) {
-        // Sort: server messages by created_at, local pending messages stay at end
         localMessages.sort((a, b) => {
           const aTime = a.created_at || Infinity;
           const bTime = b.created_at || Infinity;
@@ -282,6 +287,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       startPolling();
     } else if (data.session_type === 'order') {
       contextInfo.textContent = `${data.customer_name} — Order #${data.order_id}`;
+      showOrderBanner(data);
       showOrderPanel(data);
       messagesArea.innerHTML = '';
       enableChat();

@@ -7,26 +7,35 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="app-layout">
-    <div class="chat-panel">
-      <div class="chat-header">
+  <div class="app-wrapper">
+    <header class="app-header">
+      <div class="header-inner">
         <h1>Primingo Support Chat</h1>
         <p id="context-info"></p>
       </div>
-      <div class="chat-messages" id="messages"></div>
-      <div class="chat-composer">
-        <input type="text" id="message-input" placeholder="Type your message..." disabled>
-        <button id="send-btn" disabled>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
-        </button>
+    </header>
+    <div class="order-banner hidden" id="order-banner"></div>
+    <div class="app-layout">
+      <div class="chat-panel">
+        <div class="chat-messages" id="messages"></div>
+        <div class="chat-composer">
+          <input type="text" id="message-input" placeholder="Type your message..." disabled>
+          <button id="send-btn" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+          </button>
+        </div>
       </div>
-    </div>
-    <div class="order-panel hidden" id="order-panel">
-      <div class="order-panel-header">Selected Order</div>
-      <div class="order-panel-body" id="order-panel-body"></div>
-      <div class="order-panel-actions">
-        <button class="order-action-btn primary" id="btn-send-order">Send Order Details</button>
-        <button class="order-action-btn secondary" id="btn-aftersale">After-sale Support</button>
+      <div class="order-panel hidden" id="order-panel">
+        <div class="order-card">
+          <div class="order-card-header">Selected Order</div>
+          <div class="order-card-body" id="order-card-body"></div>
+          <div class="order-card-actions">
+            <button class="action-btn primary" id="btn-send-order">Send Order Details</button>
+            <button class="action-btn accent" id="btn-aftersale">After-sale Support</button>
+            <a class="action-btn outline" id="btn-renew" href="#">Renew Product</a>
+            <a class="action-btn ghost" href="https://primingo.com/my-account/primingo-orders/">Back to My Products</a>
+          </div>
+        </div>
       </div>
     </div>
   </div>

@@ -8,71 +8,90 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: #f0f2f5;
   min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .hidden {
   display: none !important;
 }
 
+.app-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Header */
+.app-header {
+  background: #213F91;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 14px 24px;
+}
+
+.app-header h1 {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.app-header p {
+  font-size: 0.78rem;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+
+/* Order Banner */
+.order-banner {
+  background: #FFC83D;
+  color: #213F91;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 8px 24px;
+  flex-shrink: 0;
+}
+
+/* Layout */
 .app-layout {
   display: flex;
-  gap: 16px;
+  flex: 1;
+  max-width: 1100px;
   width: 100%;
-  max-width: 900px;
-  height: 100vh;
-  max-height: 680px;
-  padding: 16px;
+  margin: 0 auto;
+  padding: 16px 24px;
+  gap: 16px;
+  min-height: 0;
 }
 
 @media (max-width: 768px) {
   .app-layout {
     flex-direction: column-reverse;
-    max-height: none;
-    height: 100vh;
     padding: 0;
     gap: 0;
   }
 }
 
-/* Chat Panel - Left */
+/* Chat Panel */
 .chat-panel {
   flex: 1;
   display: flex;
   flex-direction: column;
   background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
   overflow: hidden;
   min-width: 0;
+  min-height: 0;
 }
 
 @media (max-width: 768px) {
   .chat-panel {
     flex: 1;
     border-radius: 0;
-    min-height: 0;
   }
-}
-
-.chat-header {
-  background: #213F91;
-  color: #fff;
-  padding: 16px 20px;
-  flex-shrink: 0;
-}
-
-.chat-header h1 {
-  font-size: 1.05rem;
-  font-weight: 600;
-  margin-bottom: 2px;
-}
-
-.chat-header p {
-  font-size: 0.78rem;
-  opacity: 0.8;
 }
 
 .chat-messages {
@@ -81,8 +100,9 @@ body {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-height: 0;
+  background: #fafbfc;
 }
 
 .chat-composer {
@@ -96,7 +116,7 @@ body {
 
 .chat-composer input {
   flex: 1;
-  padding: 10px 14px;
+  padding: 10px 16px;
   border: 1px solid #dde0e4;
   border-radius: 24px;
   font-size: 0.88rem;
@@ -109,8 +129,8 @@ body {
 }
 
 .chat-composer button {
-  width: 38px;
-  height: 38px;
+  width: 40px;
+  height: 40px;
   background: #213F91;
   color: #fff;
   border: none;
@@ -131,68 +151,65 @@ body {
   cursor: not-allowed;
 }
 
-/* Order Panel - Right */
+/* Order Panel */
 .order-panel {
-  width: 280px;
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
+  width: 300px;
   flex-shrink: 0;
 }
 
 @media (max-width: 768px) {
   .order-panel {
     width: 100%;
-    border-radius: 0;
-    flex-shrink: 0;
-    max-height: 200px;
-    overflow-y: auto;
-    padding: 16px;
   }
 }
 
-.order-panel-header {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #213F91;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  margin-bottom: 16px;
-  padding-bottom: 10px;
-  border-bottom: 2px solid #FFC83D;
+.order-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
 }
 
-.order-panel-body {
-  flex: 1;
+.order-card-header {
+  background: #213F91;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 12px 18px;
+}
+
+.order-card-body {
+  padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .order-product-name {
-  font-size: 1.05rem;
+  font-size: 1.1rem;
   font-weight: 700;
   color: #1a1a1a;
   line-height: 1.3;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
 }
 
-.order-row {
+.order-detail-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.order-row .label {
+.order-detail-row .label {
   font-size: 0.72rem;
-  color: #888;
+  color: #777;
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
 
-.order-row .value {
+.order-detail-row .value {
   font-size: 0.82rem;
   font-weight: 500;
   color: #1a1a1a;
@@ -208,65 +225,82 @@ body {
   color: #2e7d32;
 }
 
-.order-panel-actions {
+.order-card-actions {
+  padding: 14px 18px;
+  border-top: 1px solid #f0f0f0;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid #eee;
 }
 
-.order-action-btn {
+.action-btn {
+  display: block;
+  width: 100%;
   padding: 10px 14px;
   font-size: 0.82rem;
   font-weight: 600;
   border: none;
   border-radius: 8px;
   cursor: pointer;
+  text-align: center;
+  text-decoration: none;
   transition: opacity 0.2s;
 }
 
-.order-action-btn:hover {
+.action-btn:hover {
   opacity: 0.85;
 }
 
-.order-action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.order-action-btn.primary {
+.action-btn.primary {
   background: #213F91;
   color: #fff;
 }
 
-.order-action-btn.secondary {
+.action-btn.accent {
   background: #FFC83D;
   color: #213F91;
 }
 
+.action-btn.outline {
+  background: transparent;
+  border: 1.5px solid #213F91;
+  color: #213F91;
+}
+
+.action-btn.ghost {
+  background: transparent;
+  color: #213F91;
+  font-weight: 500;
+  padding: 8px 14px;
+}
+
+.action-btn.ghost:hover {
+  background: #f5f7fb;
+}
+
 /* Message Bubbles */
 .msg-bubble {
-  max-width: 75%;
+  max-width: 72%;
   padding: 10px 14px;
-  border-radius: 16px;
+  border-radius: 14px;
   font-size: 0.88rem;
-  line-height: 1.4;
+  line-height: 1.45;
   word-wrap: break-word;
+  white-space: pre-wrap;
 }
 
 .msg-bubble.customer {
   align-self: flex-end;
-  background: #213F91;
-  color: #fff;
+  background: #FFF3D0;
+  color: #1a1a1a;
   border-bottom-right-radius: 4px;
 }
 
 .msg-bubble.admin {
   align-self: flex-start;
-  background: #f0f2f5;
+  background: #fff;
   color: #1a1a1a;
+  border: 1px solid #e8eaed;
   border-bottom-left-radius: 4px;
 }
 
@@ -275,9 +309,9 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
-  margin-top: 3px;
+  margin-top: 4px;
   font-size: 0.62rem;
-  opacity: 0.7;
+  opacity: 0.6;
 }
 
 .msg-tick {
@@ -286,26 +320,26 @@ body {
 }
 
 .msg-tick.sent svg {
-  stroke: #90ee90;
+  stroke: #2e7d32;
 }
 
 .msg-tick.sending svg,
 .msg-tick.queued svg {
-  stroke: rgba(255, 255, 255, 0.5);
+  stroke: #999;
 }
 
 .msg-tick.failed svg {
-  stroke: #ff6b6b;
+  stroke: #c0392b;
 }
 
 .retry-btn {
   margin-left: 6px;
-  padding: 1px 8px;
+  padding: 2px 8px;
   font-size: 0.62rem;
-  background: #ff6b6b;
+  background: #c0392b;
   color: #fff;
   border: none;
-  border-radius: 3px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
