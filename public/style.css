@@ -64,6 +64,11 @@ body {
   border-radius: 8px;
 }
 
+.system-message.error {
+  color: #c0392b;
+  background: #fdecea;
+}
+
 .chat-input {
   display: flex;
   padding: 12px;
