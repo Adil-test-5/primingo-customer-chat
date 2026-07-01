@@ -14,56 +14,89 @@ body {
   display: none !important;
 }
 
-.app-wrapper {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
+/* Site Header */
+.site-header {
+  background: #fff;
+  border-bottom: 1px solid #e8eaed;
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
-/* Header */
-.app-header {
-  background: #213F91;
-  color: #fff;
-  flex-shrink: 0;
-}
-
-.header-inner {
+.site-header-inner {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 14px 24px;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
 }
 
-.app-header h1 {
-  font-size: 1.1rem;
-  font-weight: 600;
-}
-
-.app-header p {
-  font-size: 0.78rem;
-  opacity: 0.8;
-  margin-top: 2px;
-}
-
-/* Order Banner */
-.order-banner {
-  background: #FFC83D;
+.site-logo {
+  font-size: 1.2rem;
+  font-weight: 800;
   color: #213F91;
-  font-size: 0.82rem;
+  text-decoration: none;
+  letter-spacing: -0.5px;
+}
+
+.site-nav {
+  display: flex;
+  gap: 20px;
+  flex: 1;
+}
+
+.site-nav a {
+  font-size: 0.85rem;
+  color: #444;
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.site-nav a:hover {
+  color: #213F91;
+}
+
+.site-btn {
+  font-size: 0.8rem;
   font-weight: 600;
-  padding: 8px 24px;
-  flex-shrink: 0;
+  color: #213F91;
+  background: #FFC83D;
+  padding: 8px 16px;
+  border-radius: 6px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.site-btn:hover {
+  opacity: 0.85;
+}
+
+@media (max-width: 768px) {
+  .site-header-inner {
+    padding: 10px 16px;
+  }
+  .site-nav {
+    display: none;
+  }
+}
+
+/* App Wrapper */
+.app-wrapper {
+  flex: 1;
+  min-height: 0;
 }
 
 /* Layout */
 .app-layout {
   display: flex;
-  flex: 1;
   max-width: 1100px;
   width: 100%;
   margin: 0 auto;
   padding: 16px 24px;
   gap: 16px;
-  min-height: 0;
+  height: calc(100vh - 52px);
 }
 
 @media (max-width: 768px) {
@@ -85,6 +118,33 @@ body {
   overflow: hidden;
   min-width: 0;
   min-height: 0;
+}
+
+.chat-panel-header {
+  background: #213F91;
+  color: #fff;
+  padding: 14px 20px;
+  flex-shrink: 0;
+}
+
+.chat-panel-header h1 {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.chat-panel-header p {
+  font-size: 0.78rem;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+
+.order-banner {
+  background: #FFC83D;
+  color: #213F91;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 7px 20px;
+  flex-shrink: 0;
 }
 
 @media (max-width: 768px) {

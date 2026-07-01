@@ -7,16 +7,26 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="app-wrapper">
-    <header class="app-header">
-      <div class="header-inner">
-        <h1>Primingo Support Chat</h1>
-        <p id="context-info"></p>
+  <nav class="site-header">
+    <div class="site-header-inner">
+      <a href="https://primingo.com" class="site-logo">Primingo</a>
+      <div class="site-nav">
+        <a href="https://primingo.com">Home</a>
+        <a href="https://primingo.com/my-account/primingo-orders/">My Products</a>
+        <a href="/order-chat?type=general">Contact Support</a>
       </div>
-    </header>
-    <div class="order-banner hidden" id="order-banner"></div>
+      <a href="https://primingo.com" class="site-btn">Back to Primingo</a>
+    </div>
+  </nav>
+
+  <div class="app-wrapper">
     <div class="app-layout">
       <div class="chat-panel">
+        <div class="chat-panel-header">
+          <h1>Primingo Support Chat</h1>
+          <p id="context-info"></p>
+        </div>
+        <div class="order-banner hidden" id="order-banner"></div>
         <div class="chat-messages" id="messages"></div>
         <div class="chat-composer">
           <input type="text" id="message-input" placeholder="Type your message..." disabled>
