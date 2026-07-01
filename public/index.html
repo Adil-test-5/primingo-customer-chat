@@ -12,13 +12,14 @@
       <h1>Primingo Support Chat</h1>
       <p id="context-info"></p>
     </div>
+    <div id="order-card" class="order-card hidden"></div>
     <div class="chat-body">
-      <div class="chat-messages" id="messages">
-        <div class="system-message">Chat system is being prepared</div>
-      </div>
-      <div class="chat-input">
+      <div class="chat-messages" id="messages"></div>
+      <div class="chat-composer">
         <input type="text" id="message-input" placeholder="Type your message..." disabled>
-        <button id="send-btn" disabled>Send</button>
+        <button id="send-btn" disabled>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+        </button>
       </div>
     </div>
   </div>

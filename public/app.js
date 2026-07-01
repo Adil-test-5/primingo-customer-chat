@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
   const contextInfo = document.getElementById('context-info');
+  const orderCard = document.getElementById('order-card');
   const messagesArea = document.getElementById('messages');
   const messageInput = document.getElementById('message-input');
   const sendBtn = document.getElementById('send-btn');
@@ -10,170 +11,220 @@ document.addEventListener('DOMContentLoaded', async () => {
   const type = params.get('type');
 
   let sessionData = null;
-  let knownMessageIds = new Set();
+  let knownServerIds = new Set();
+  let localMessages = [];
+  let messageQueue = [];
+  let isProcessingQueue = false;
   let pollInterval = null;
 
-  const setStatus = (text, isError) => {
-    messagesArea.innerHTML = `<div class="system-message ${isError ? 'error' : ''}">${text}</div>`;
-  };
+  const TICK_SENT = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M2 12l5 5L20 5"/><path d="M7 12l5 5L22 7"/></svg>';
+  const TICK_PENDING = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5L20 5"/></svg>';
+  const TICK_FAILED = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>';
 
-  const showOrderInfo = (data) => {
-    messagesArea.innerHTML = `
-      <div class="order-info">
-        <div class="order-info-row"><span>Product</span><span>${data.product}</span></div>
-        <div class="order-info-row"><span>Plan</span><span>${data.plan}</span></div>
-        <div class="order-info-row"><span>Status</span><span class="badge">${data.order_status}</span></div>
-        <div class="order-info-row"><span>Purchased</span><span>${data.purchase_date}</span></div>
-        <div class="order-info-row"><span>Expires</span><span>${data.expiry_date}</span></div>
-        <div class="order-info-row"><span>Days left</span><span>${data.days_left}</span></div>
-      </div>`;
-  };
+  function showNotice(text, isError) {
+    messagesArea.innerHTML = `<div class="system-notice ${isError ? 'error' : ''}">${text}</div>`;
+  }
 
-  const enableChat = () => {
+  function showOrderCard(data) {
+    orderCard.classList.remove('hidden');
+    orderCard.innerHTML = `
+      <span class="order-tag"><strong>${data.product}</strong></span>
+      <span class="order-tag">Plan: <strong>${data.plan}</strong></span>
+      <span class="order-tag">Status: <strong>${data.order_status}</strong></span>
+      <span class="order-tag">Expires: <strong>${data.expiry_date}</strong> (${data.days_left}d)</span>`;
+  }
+
+  function enableChat() {
     messageInput.disabled = false;
     messageInput.placeholder = 'Type your message...';
     sendBtn.disabled = false;
-  };
+    messageInput.focus();
+  }
 
-  const clearMessages = () => {
-    messagesArea.querySelectorAll('.chat-message, .system-message').forEach(el => {
-      if (!el.closest('.order-info')) el.remove();
+  function scrollToBottom() {
+    messagesArea.scrollTop = messagesArea.scrollHeight;
+  }
+
+  function renderAllMessages() {
+    messagesArea.innerHTML = '';
+    localMessages.forEach(msg => {
+      const el = createBubble(msg);
+      messagesArea.appendChild(el);
     });
-    messagesArea.style.alignItems = 'flex-start';
-  };
+    scrollToBottom();
+  }
 
-  const renderMessages = (messages) => {
-    const pendingEls = messagesArea.querySelectorAll('.chat-message[data-pending]');
-    const pendingTexts = new Set();
-    pendingEls.forEach(el => {
-      pendingTexts.add(el.querySelector('.msg-text').textContent);
-    });
+  function createBubble(msg) {
+    const el = document.createElement('div');
+    el.className = `msg-bubble ${msg.sender}`;
+    el.dataset.localId = msg.localId || '';
 
-    messages.forEach(msg => {
-      if (knownMessageIds.has(msg.id)) return;
-      knownMessageIds.add(msg.id);
+    let metaHtml = '';
+    if (msg.sender === 'customer') {
+      let tickClass = msg.status || 'sent';
+      let tickSvg = tickClass === 'sent' ? TICK_SENT : tickClass === 'failed' ? TICK_FAILED : TICK_PENDING;
+      metaHtml = `<div class="msg-meta"><span class="msg-tick ${tickClass}">${tickSvg}</span>`;
+      if (msg.status === 'failed') {
+        metaHtml += `<button class="retry-btn" data-local-id="${msg.localId}">Retry</button>`;
+      }
+      metaHtml += `</div>`;
+    }
 
-      if (msg.sender === 'customer' && pendingTexts.has(msg.content)) {
-        const match = [...pendingEls].find(el =>
-          el.querySelector('.msg-text').textContent === msg.content
-        );
-        if (match) {
-          match.removeAttribute('data-pending');
-          match.dataset.id = msg.id;
-          const statusEl = match.querySelector('.msg-status');
-          statusEl.className = 'msg-status sent';
-          statusEl.textContent = 'sent';
-          const retryBtn = match.querySelector('.retry-btn');
-          if (retryBtn) retryBtn.remove();
-          pendingTexts.delete(msg.content);
-          return;
+    el.innerHTML = `<div class="msg-text">${escapeHtml(msg.content)}</div>${metaHtml}`;
+    return el;
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function addLocalMessage(text) {
+    const localId = 'local_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    const msg = { localId, content: text, sender: 'customer', status: 'queued', serverId: null };
+    localMessages.push(msg);
+    renderAllMessages();
+    return msg;
+  }
+
+  function updateLocalMessageStatus(localId, status, serverId) {
+    const msg = localMessages.find(m => m.localId === localId);
+    if (msg) {
+      msg.status = status;
+      if (serverId) {
+        msg.serverId = serverId;
+        knownServerIds.add(serverId);
+      }
+    }
+    renderAllMessages();
+  }
+
+  async function processQueue() {
+    if (isProcessingQueue) return;
+    isProcessingQueue = true;
+
+    while (messageQueue.length > 0) {
+      const item = messageQueue[0];
+      updateLocalMessageStatus(item.localId, 'sending');
+
+      try {
+        const res = await fetch('/api/messages/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: item.content,
+            session_type: sessionData.session_type,
+            customer_email: sessionData.customer_email,
+            customer_name: sessionData.customer_name,
+            order_data: sessionData.session_type === 'order' ? sessionData : null
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          updateLocalMessageStatus(item.localId, 'sent', data.message_id);
+          messageQueue.shift();
+        } else {
+          updateLocalMessageStatus(item.localId, 'failed');
+          messageQueue.shift();
         }
+      } catch (err) {
+        updateLocalMessageStatus(item.localId, 'failed');
+        messageQueue.shift();
       }
-
-      const msgEl = document.createElement('div');
-      msgEl.className = `chat-message ${msg.sender}`;
-      msgEl.dataset.id = msg.id;
-      msgEl.innerHTML = `<div class="msg-text">${msg.content}</div>`;
-      messagesArea.appendChild(msgEl);
-    });
-
-    messagesArea.scrollTop = messagesArea.scrollHeight;
-  };
-
-  const loadHistory = async () => {
-    if (!sessionData?.customer_email) return;
-
-    try {
-      const res = await fetch(`/api/messages/history?customer_email=${encodeURIComponent(sessionData.customer_email)}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.messages?.length) {
-        renderMessages(data.messages);
-      }
-    } catch (err) {}
-  };
-
-  const startPolling = () => {
-    pollInterval = setInterval(loadHistory, 5000);
-  };
-
-  const addMessage = (text) => {
-    clearMessages();
-
-    const msgEl = document.createElement('div');
-    msgEl.className = 'chat-message customer';
-    msgEl.setAttribute('data-pending', 'true');
-    msgEl.innerHTML = `
-      <div class="msg-text">${text}</div>
-      <div class="msg-status sending">sending</div>`;
-    messagesArea.appendChild(msgEl);
-    messagesArea.scrollTop = messagesArea.scrollHeight;
-    return msgEl;
-  };
-
-  const updateMessageStatus = (msgEl, status) => {
-    const statusEl = msgEl.querySelector('.msg-status');
-    statusEl.className = `msg-status ${status}`;
-    statusEl.textContent = status;
-
-    const retryBtn = msgEl.querySelector('.retry-btn');
-    if (retryBtn) retryBtn.remove();
-
-    if (status === 'failed') {
-      const btn = document.createElement('button');
-      btn.className = 'retry-btn';
-      btn.textContent = 'Retry';
-      btn.onclick = () => retrySend(msgEl);
-      statusEl.after(btn);
     }
-  };
 
-  const sendMessageToServer = async (msgEl, text) => {
-    updateMessageStatus(msgEl, 'sending');
-    try {
-      const res = await fetch('/api/messages/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text,
-          session_type: sessionData.session_type,
-          customer_email: sessionData.customer_email,
-          customer_name: sessionData.customer_name,
-          order_data: sessionData.session_type === 'order' ? sessionData : null
-        })
-      });
+    isProcessingQueue = false;
+  }
 
-      if (!res.ok) {
-        updateMessageStatus(msgEl, 'failed');
-        return;
-      }
+  function retryMessage(localId) {
+    const msg = localMessages.find(m => m.localId === localId);
+    if (!msg) return;
+    msg.status = 'queued';
+    messageQueue.push({ localId: msg.localId, content: msg.content });
+    renderAllMessages();
+    processQueue();
+  }
 
-      updateMessageStatus(msgEl, 'sent');
-    } catch (err) {
-      updateMessageStatus(msgEl, 'failed');
-    }
-  };
+  messagesArea.addEventListener('click', (e) => {
+    const btn = e.target.closest('.retry-btn');
+    if (btn) retryMessage(btn.dataset.localId);
+  });
 
-  const retrySend = (msgEl) => {
-    const text = msgEl.querySelector('.msg-text').textContent;
-    sendMessageToServer(msgEl, text);
-  };
-
-  const handleSend = () => {
+  function handleSend() {
     const text = messageInput.value.trim();
     if (!text) return;
 
     messageInput.value = '';
-    const msgEl = addMessage(text);
-    sendMessageToServer(msgEl, text);
-  };
+    const msg = addLocalMessage(text);
+    messageQueue.push({ localId: msg.localId, content: msg.content });
+    processQueue();
+  }
 
   sendBtn.addEventListener('click', handleSend);
   messageInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') handleSend();
   });
 
-  setStatus('Verifying session...');
+  async function loadHistory() {
+    if (!sessionData?.customer_email) return;
+
+    try {
+      const res = await fetch(`/api/messages/history?customer_email=${encodeURIComponent(sessionData.customer_email)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.messages) return;
+
+      let changed = false;
+
+      data.messages.forEach(serverMsg => {
+        if (knownServerIds.has(serverMsg.id)) return;
+
+        if (serverMsg.sender === 'customer') {
+          const match = localMessages.find(m =>
+            m.sender === 'customer' && !m.serverId && m.content === serverMsg.content
+          );
+          if (match) {
+            match.serverId = serverMsg.id;
+            match.status = 'sent';
+            knownServerIds.add(serverMsg.id);
+            changed = true;
+            return;
+          }
+        }
+
+        knownServerIds.add(serverMsg.id);
+        localMessages.push({
+          localId: 'server_' + serverMsg.id,
+          content: serverMsg.content,
+          sender: serverMsg.sender,
+          status: 'sent',
+          serverId: serverMsg.id,
+          created_at: serverMsg.created_at
+        });
+        changed = true;
+      });
+
+      if (changed) {
+        localMessages.sort((a, b) => {
+          const aTime = a.created_at || 0;
+          const bTime = b.created_at || 0;
+          if (aTime && bTime) return aTime - bTime;
+          if (aTime) return -1;
+          if (bTime) return 1;
+          return 0;
+        });
+        renderAllMessages();
+      }
+    } catch (err) {}
+  }
+
+  function startPolling() {
+    pollInterval = setInterval(loadHistory, 5000);
+  }
+
+  showNotice('Verifying session...');
 
   const body = {};
   if (type === 'general') {
@@ -195,7 +246,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (!res.ok) {
       contextInfo.textContent = '';
-      setStatus(data.message, true);
+      showNotice(data.message, true);
       return;
     }
 
@@ -204,18 +255,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (data.session_type === 'general') {
       contextInfo.textContent = 'General Support';
       messagesArea.innerHTML = '';
-      messagesArea.style.alignItems = 'flex-start';
       enableChat();
       await loadHistory();
       startPolling();
     } else if (data.session_type === 'order') {
       contextInfo.textContent = `${data.customer_name} — Order #${data.order_id}`;
-      showOrderInfo(data);
+      showOrderCard(data);
+      messagesArea.innerHTML = '';
       enableChat();
       await loadHistory();
       startPolling();
     }
   } catch (err) {
-    setStatus('Unable to connect. Please try again later.', true);
+    showNotice('Unable to connect. Please try again later.', true);
   }
 });
