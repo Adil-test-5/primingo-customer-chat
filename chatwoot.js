@@ -151,14 +151,35 @@ async function getMessages(conversationId) {
   const messages = data.payload || [];
 
   return messages
-    .filter(m => !m.private)
-    .filter(m => !m.content?.startsWith('--- Order Context ---'))
-    .map(m => ({
-      id: m.id,
-      content: m.content,
-      sender: m.message_type === 'incoming' ? 'customer' : 'admin',
-      created_at: m.created_at
-    }));
+    .filter(m => {
+      if (m.private) return false;
+      if (m.message_type === 2 || m.message_type === 'activity') return false;
+      if (m.content_type === 'activity') return false;
+      if (!m.content || !m.content.trim()) return false;
+      if (m.content.startsWith('--- Order Context ---')) return false;
+      const lower = m.content.toLowerCase();
+      if (/^conversation was (assigned|reopened|snoozed|resolved|muted|unmuted)/.test(lower)) return false;
+      if (/^(assigned to|status changed|snoozed until)/.test(lower)) return false;
+      return true;
+    })
+    .map(m => {
+      let sender;
+      if (m.message_type === 0 || m.message_type === 'incoming') {
+        sender = 'customer';
+      } else if (m.message_type === 1 || m.message_type === 'outgoing') {
+        sender = 'admin';
+      } else if (m.sender_type === 'Contact' || m.sender?.type === 'contact') {
+        sender = 'customer';
+      } else {
+        sender = 'admin';
+      }
+      return {
+        id: m.id,
+        content: m.content,
+        sender,
+        created_at: m.created_at
+      };
+    });
 }
 
 module.exports = { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getMessages, getSession, saveSession };
