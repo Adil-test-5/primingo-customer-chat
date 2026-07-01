@@ -18,10 +18,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   let messageQueue = [];
   let isProcessingQueue = false;
   let pollInterval = null;
+  let readStatusInterval = null;
+  let agentLastSeen = null;
 
-  const TICK_SENT = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M2 12l5 5L12 12"/><path d="M8 12l5 5L22 7"/></svg>';
-  const TICK_PENDING = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 5"/></svg>';
-  const TICK_FAILED = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>';
+  const TICK_SENT = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5L20 7"/></svg>';
+  const TICK_DELIVERED = '<svg width="14" height="12" viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M2 12l5 5L17 7"/><path d="M8 12l5 5L23 7"/></svg>';
+  const TICK_READ = '<svg width="14" height="12" viewBox="0 0 28 24" fill="none" stroke="#53bdeb" stroke-width="2.5"><path d="M2 12l5 5L17 7"/><path d="M8 12l5 5L23 7"/></svg>';
+  const TICK_PENDING = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>';
+  const TICK_FAILED = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>';
 
   function escapeHtml(str) {
     const div = document.createElement('div');
@@ -83,6 +87,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     messagesArea.scrollTop = messagesArea.scrollHeight;
   }
 
+  function getTickHtml(status) {
+    switch (status) {
+      case 'read': return `<span class="msg-tick read">${TICK_READ}</span>`;
+      case 'delivered': return `<span class="msg-tick delivered">${TICK_DELIVERED}</span>`;
+      case 'sent': return `<span class="msg-tick sent">${TICK_SENT}</span>`;
+      case 'sending': return `<span class="msg-tick sending">${TICK_PENDING}</span>`;
+      case 'queued': return `<span class="msg-tick queued">${TICK_PENDING}</span>`;
+      case 'failed': return `<span class="msg-tick failed">${TICK_FAILED}</span>`;
+      default: return '';
+    }
+  }
+
   function renderAllMessages() {
     messagesArea.innerHTML = '';
     localMessages.forEach(msg => {
@@ -97,8 +113,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     let metaHtml = '';
     if (msg.sender === 'customer' && msg.status) {
-      const tickSvg = msg.status === 'sent' ? TICK_SENT : msg.status === 'failed' ? TICK_FAILED : TICK_PENDING;
-      metaHtml = `<div class="msg-meta"><span class="msg-tick ${msg.status}">${tickSvg}</span>`;
+      metaHtml = `<div class="msg-meta">${getTickHtml(msg.status)}`;
       if (msg.status === 'failed') {
         metaHtml += `<button class="retry-btn" data-local-id="${msg.localId}">Retry</button>`;
       }
@@ -111,7 +126,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function addLocalMessage(text) {
     const localId = 'local_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-    const msg = { localId, content: text, sender: 'customer', status: 'queued', serverId: null };
+    const msg = { localId, content: text, sender: 'customer', status: 'queued', serverId: null, created_at: null };
     localMessages.push(msg);
     renderAllMessages();
     return msg;
@@ -152,7 +167,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (res.ok) {
           const data = await res.json();
-          updateLocalMessageStatus(item.localId, 'sent', data.message_id);
+          updateLocalMessageStatus(item.localId, 'delivered', data.message_id);
         } else {
           updateLocalMessageStatus(item.localId, 'failed');
         }
@@ -216,7 +231,8 @@ document.addEventListener('DOMContentLoaded', async () => {
           );
           if (match) {
             match.serverId = serverMsg.id;
-            match.status = 'sent';
+            match.status = 'delivered';
+            match.created_at = serverMsg.created_at;
             knownServerIds.add(serverMsg.id);
             changed = true;
             return;
@@ -228,7 +244,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           localId: 'server_' + serverMsg.id,
           content: serverMsg.content,
           sender: serverMsg.sender,
-          status: serverMsg.sender === 'customer' ? 'sent' : undefined,
+          status: serverMsg.sender === 'customer' ? 'delivered' : undefined,
           serverId: serverMsg.id,
           created_at: serverMsg.created_at
         });
@@ -246,9 +262,56 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (err) {}
   }
 
+  async function checkReadStatus() {
+    if (!sessionData?.customer_email) return;
+
+    try {
+      const res = await fetch(`/api/messages/read-status?customer_email=${encodeURIComponent(sessionData.customer_email)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (data.agent_last_seen) {
+        const newLastSeen = data.agent_last_seen;
+        if (newLastSeen !== agentLastSeen) {
+          agentLastSeen = newLastSeen;
+          let changed = false;
+          localMessages.forEach(msg => {
+            if (msg.sender === 'customer' && msg.serverId && msg.created_at && msg.status !== 'read') {
+              if (msg.created_at <= agentLastSeen) {
+                msg.status = 'read';
+                changed = true;
+              }
+            }
+          });
+          if (changed) renderAllMessages();
+        }
+      }
+    } catch (err) {}
+  }
+
+  async function markAdminMessagesRead() {
+    if (!sessionData?.customer_email) return;
+    if (document.hidden) return;
+
+    try {
+      await fetch('/api/messages/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_email: sessionData.customer_email })
+      });
+    } catch (err) {}
+  }
+
   function startPolling() {
     pollInterval = setInterval(loadHistory, 5000);
+    readStatusInterval = setInterval(checkReadStatus, 10000);
   }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && sessionData?.customer_email) {
+      markAdminMessagesRead();
+    }
+  });
 
   // --- Init ---
   showNotice('Verifying session...');
@@ -284,6 +347,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       messagesArea.innerHTML = '';
       enableChat();
       await loadHistory();
+      markAdminMessagesRead();
       startPolling();
     } else if (data.session_type === 'order') {
       contextInfo.textContent = `${data.customer_name} — Order #${data.order_id}`;
@@ -292,6 +356,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       messagesArea.innerHTML = '';
       enableChat();
       await loadHistory();
+      markAdminMessagesRead();
       startPolling();
     }
   } catch (err) {

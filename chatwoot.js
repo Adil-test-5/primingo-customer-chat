@@ -183,4 +183,26 @@ async function getMessages(conversationId) {
     });
 }
 
-module.exports = { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getMessages, getSession, saveSession };
+async function markConversationRead(conversationId) {
+  await fetch(apiUrl(`/conversations/${conversationId}/update_last_seen`), {
+    method: 'POST',
+    headers: headers()
+  });
+}
+
+async function getConversationMeta(conversationId) {
+  const res = await fetch(apiUrl(`/conversations/${conversationId}`), {
+    headers: headers()
+  });
+
+  if (!res.ok) {
+    return { agentRead: false, agentLastSeen: null };
+  }
+
+  const data = await res.json();
+  const agentLastSeen = data.agent_last_seen_at || null;
+  const agentRead = !!agentLastSeen;
+  return { agentRead, agentLastSeen };
+}
+
+module.exports = { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta };

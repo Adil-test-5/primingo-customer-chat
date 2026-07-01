@@ -386,8 +386,13 @@ body {
   align-items: center;
 }
 
-.msg-tick.sent svg {
-  stroke: #2e7d32;
+.msg-tick.sent svg,
+.msg-tick.delivered svg {
+  stroke: #999;
+}
+
+.msg-tick.read svg {
+  stroke: #53bdeb;
 }
 
 .msg-tick.sending svg,

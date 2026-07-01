@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getMessages, getSession, saveSession } = require('./chatwoot');
+const { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta } = require('./chatwoot');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -152,6 +152,46 @@ app.get('/api/messages/history', async (req, res) => {
     res.json({ status: 'ok', messages });
   } catch (err) {
     res.status(502).json({ status: 'error', message: 'Failed to load messages.' });
+  }
+});
+
+app.post('/api/messages/mark-read', async (req, res) => {
+  const { customer_email } = req.body;
+
+  if (!customer_email) {
+    return res.status(400).json({ status: 'error', message: 'Session not verified.' });
+  }
+
+  const session = getSession(customer_email);
+  if (!session?.conversation_id) {
+    return res.json({ status: 'ok' });
+  }
+
+  try {
+    await markConversationRead(session.conversation_id);
+    res.json({ status: 'ok' });
+  } catch (err) {
+    res.json({ status: 'ok' });
+  }
+});
+
+app.get('/api/messages/read-status', async (req, res) => {
+  const { customer_email } = req.query;
+
+  if (!customer_email) {
+    return res.status(400).json({ status: 'error', message: 'Session not verified.' });
+  }
+
+  const session = getSession(customer_email);
+  if (!session?.conversation_id) {
+    return res.json({ status: 'ok', agent_read: false, agent_last_seen: null });
+  }
+
+  try {
+    const meta = await getConversationMeta(session.conversation_id);
+    res.json({ status: 'ok', agent_read: meta.agentRead, agent_last_seen: meta.agentLastSeen });
+  } catch (err) {
+    res.json({ status: 'ok', agent_read: false, agent_last_seen: null });
   }
 });
 
