@@ -154,12 +154,13 @@ async function getMessages(conversationId) {
     .filter(m => {
       if (m.private) return false;
       if (m.message_type === 2 || m.message_type === 'activity') return false;
-      if (m.content_type === 'activity') return false;
+      if (m.content_type && m.content_type !== 'text' && m.content_type !== 'input_text') return false;
       if (!m.content || !m.content.trim()) return false;
       if (m.content.startsWith('--- Order Context ---')) return false;
       const lower = m.content.toLowerCase();
-      if (/^conversation was (assigned|reopened|snoozed|resolved|muted|unmuted)/.test(lower)) return false;
-      if (/^(assigned to|status changed|snoozed until)/.test(lower)) return false;
+      if (/^conversation was /.test(lower)) return false;
+      if (/^(assigned to|status changed|snoozed until|resolved by|reopened by)/.test(lower)) return false;
+      if (m.content_attributes?.deleted) return false;
       return true;
     })
     .map(m => {
