@@ -16,8 +16,8 @@ body {
 
 /* Site Header */
 .site-header {
-  background: #FFC83D;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
   position: sticky;
   top: 0;
   z-index: 100;
@@ -52,21 +52,24 @@ body {
 
 .site-nav a {
   font-size: 0.85rem;
-  color: #213F91;
+  color: #1a1a1a;
   text-decoration: none;
-  font-weight: 600;
-  transition: opacity 0.2s;
+  font-weight: 500;
+  padding-bottom: 2px;
+  border-bottom: 2px solid transparent;
+  transition: border-color 0.2s, color 0.2s;
 }
 
 .site-nav a:hover {
-  opacity: 0.7;
+  color: #213F91;
+  border-bottom-color: #FFC83D;
 }
 
 .site-btn {
   font-size: 0.8rem;
   font-weight: 600;
-  color: #fff;
-  background: #213F91;
+  color: #213F91;
+  background: #FFC83D;
   padding: 9px 18px;
   border-radius: 6px;
   text-decoration: none;
@@ -74,7 +77,7 @@ body {
 }
 
 .site-btn:hover {
-  background: #1a3278;
+  background: #f5be2e;
 }
 
 @media (max-width: 768px) {
