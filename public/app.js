@@ -35,12 +35,33 @@ document.addEventListener('DOMContentLoaded', async () => {
   function showOrderPanel(data) {
     orderPanel.classList.remove('hidden');
     orderPanelBody.innerHTML = `
-      <div class="order-row"><span class="label">Product</span><span class="value">${escapeHtml(data.product)}</span></div>
+      <div class="order-product-name">${escapeHtml(data.product)}</div>
       <div class="order-row"><span class="label">Plan</span><span class="value">${escapeHtml(data.plan)}</span></div>
-      <div class="order-row"><span class="label">Status</span><span class="value status">${escapeHtml(data.order_status)}</span></div>
+      <div class="order-row"><span class="label">Status</span><span class="status-pill">${escapeHtml(data.order_status)}</span></div>
       <div class="order-row"><span class="label">Purchased</span><span class="value">${escapeHtml(data.purchase_date)}</span></div>
       <div class="order-row"><span class="label">Expires</span><span class="value">${escapeHtml(data.expiry_date)}</span></div>
       <div class="order-row"><span class="label">Days Left</span><span class="value">${data.days_left}</span></div>`;
+
+    document.getElementById('btn-send-order').addEventListener('click', () => {
+      const contextText = [
+        `Order #${data.order_id} — Item #${data.item_id}`,
+        `Product: ${data.product}`,
+        `Plan: ${data.plan}`,
+        `Status: ${data.order_status}`,
+        `Purchased: ${data.purchase_date}`,
+        `Expires: ${data.expiry_date}`,
+        `Days left: ${data.days_left}`
+      ].join('\n');
+      const msg = addLocalMessage(contextText);
+      messageQueue.push({ localId: msg.localId, content: msg.content });
+      processQueue();
+    });
+
+    document.getElementById('btn-aftersale').addEventListener('click', () => {
+      const msg = addLocalMessage('I need after-sale support for this order.');
+      messageQueue.push({ localId: msg.localId, content: msg.content });
+      processQueue();
+    });
   }
 
   function enableChat() {

@@ -133,11 +133,11 @@ body {
 
 /* Order Panel - Right */
 .order-panel {
-  width: 260px;
+  width: 280px;
   background: #fff;
   border-radius: 16px;
   box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
-  padding: 16px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -148,19 +148,20 @@ body {
     width: 100%;
     border-radius: 0;
     flex-shrink: 0;
-    max-height: 160px;
+    max-height: 200px;
     overflow-y: auto;
+    padding: 16px;
   }
 }
 
 .order-panel-header {
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-size: 0.72rem;
+  font-weight: 700;
   color: #213F91;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
+  letter-spacing: 0.8px;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
   border-bottom: 2px solid #FFC83D;
 }
 
@@ -168,47 +169,81 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
+}
+
+.order-product-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1a1a1a;
+  line-height: 1.3;
 }
 
 .order-row {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .order-row .label {
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   color: #888;
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
 
 .order-row .value {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-weight: 500;
   color: #1a1a1a;
 }
 
-.order-row .value.status {
+.status-pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #e8f5e9;
   color: #2e7d32;
 }
 
-.renew-btn {
-  margin-top: 12px;
-  padding: 10px;
-  background: #FFC83D;
-  color: #213F91;
+.order-panel-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #eee;
+}
+
+.order-action-btn {
+  padding: 10px 14px;
+  font-size: 0.82rem;
   font-weight: 600;
-  font-size: 0.85rem;
   border: none;
   border-radius: 8px;
   cursor: pointer;
+  transition: opacity 0.2s;
 }
 
-.renew-btn:disabled {
+.order-action-btn:hover {
+  opacity: 0.85;
+}
+
+.order-action-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.order-action-btn.primary {
+  background: #213F91;
+  color: #fff;
+}
+
+.order-action-btn.secondary {
+  background: #FFC83D;
+  color: #213F91;
 }
 
 /* Message Bubbles */
