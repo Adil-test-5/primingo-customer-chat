@@ -44,6 +44,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function showOrderPanel(data) {
     orderPanel.classList.remove('hidden');
+
+    const orderCardSummary = document.getElementById('order-card-summary');
+    orderCardSummary.innerHTML = `
+      <div class="summary-product">${escapeHtml(data.product)}</div>
+      <div class="summary-detail"><span>Plan</span><span>${escapeHtml(data.plan)}</span></div>
+      <div class="summary-detail"><span>Status</span><span>${escapeHtml(data.order_status)}</span></div>
+      <div class="summary-detail"><span>Days Left</span><span>${data.days_left}</span></div>`;
+
     orderCardBody.innerHTML = `
       <div class="order-product-name">${escapeHtml(data.product)}</div>
       <div class="order-detail-row"><span class="label">Plan</span><span class="value">${escapeHtml(data.plan)}</span></div>
@@ -370,14 +378,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   const orderToggleBtn = document.getElementById('order-toggle-btn');
   if (orderToggleBtn) {
     orderToggleBtn.addEventListener('click', () => {
-      orderPanel.classList.toggle('collapsed');
-      orderToggleBtn.textContent = orderPanel.classList.contains('collapsed') ? '▶' : '▼';
+      const isCollapsed = orderPanel.classList.toggle('collapsed');
+      orderToggleBtn.textContent = isCollapsed ? '▶' : '▼';
     });
+  }
+
+  function initMobileOrderState() {
     if (window.innerWidth <= 768) {
       orderPanel.classList.add('collapsed');
-      orderToggleBtn.textContent = '▶';
+      if (orderToggleBtn) orderToggleBtn.textContent = '▶';
+    } else {
+      orderPanel.classList.remove('collapsed');
+      if (orderToggleBtn) orderToggleBtn.textContent = '▼';
     }
   }
+  initMobileOrderState();
 
   // --- Init ---
   showNotice('Verifying session...');

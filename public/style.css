@@ -8,6 +8,7 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: #f0f2f5;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 .hidden {
@@ -117,11 +118,12 @@ body {
 
 @media (max-width: 768px) {
   .app-layout {
-    flex-direction: column-reverse;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
     padding: 0;
-    gap: 0;
-    height: calc(100dvh - 56px);
-    overflow: hidden;
+    height: auto;
+    overflow: visible;
   }
 }
 
@@ -167,10 +169,8 @@ body {
 
 @media (max-width: 768px) {
   .chat-panel {
-    flex: 1;
     border-radius: 0;
-    min-height: 0;
-    overflow: hidden;
+    min-height: 70dvh;
   }
 }
 
@@ -184,6 +184,13 @@ body {
   gap: 8px;
   min-height: 0;
   background: #fafbfc;
+}
+
+@media (max-width: 768px) {
+  .chat-messages {
+    max-height: calc(100dvh - 280px);
+    min-height: 300px;
+  }
 }
 
 .chat-composer {
@@ -204,6 +211,7 @@ body {
   font-size: 0.88rem;
   outline: none;
   transition: border-color 0.2s;
+  min-width: 0;
 }
 
 .chat-composer input:focus {
@@ -242,36 +250,10 @@ body {
 @media (max-width: 768px) {
   .order-panel {
     width: 100%;
+    position: static;
+    max-height: none;
+    order: -1;
     flex-shrink: 0;
-    overflow: hidden;
-  }
-
-  .order-panel .order-card {
-    border-radius: 0;
-    box-shadow: none;
-    border-bottom: 1px solid #e5e5e5;
-  }
-
-  .order-panel .order-card-body {
-    padding: 12px 16px;
-    gap: 8px;
-  }
-
-  .order-panel .order-product-name {
-    font-size: 0.95rem;
-  }
-
-  .order-panel .order-card-actions {
-    padding: 10px 16px;
-  }
-
-  .order-panel .action-btn {
-    width: 100%;
-  }
-
-  .order-panel.collapsed .order-card-body,
-  .order-panel.collapsed .order-card-actions {
-    display: none;
   }
 }
 
@@ -280,6 +262,14 @@ body {
   border-radius: 12px;
   box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
   overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  .order-card {
+    border-radius: 0;
+    box-shadow: none;
+    border-bottom: 1px solid #e5e5e5;
+  }
 }
 
 .order-card-header {
@@ -300,9 +290,9 @@ body {
   background: none;
   border: none;
   color: #fff;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 4px 8px;
 }
 
 @media (max-width: 768px) {
@@ -316,6 +306,51 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.order-card-summary {
+  padding: 12px 18px;
+  display: none;
+  gap: 6px;
+  flex-direction: column;
+  font-size: 0.82rem;
+  color: #1a1a1a;
+}
+
+.order-card-summary .summary-product {
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.order-card-summary .summary-detail {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: #555;
+}
+
+@media (max-width: 768px) {
+  .order-panel.collapsed .order-card-body,
+  .order-panel.collapsed .order-card-actions {
+    display: none;
+  }
+
+  .order-panel.collapsed .order-card-summary {
+    display: flex;
+  }
+
+  .order-panel:not(.collapsed) .order-card-summary {
+    display: none;
+  }
+
+  .order-panel .order-card-body {
+    padding: 12px 16px;
+    gap: 8px;
+  }
+
+  .order-panel .order-card-actions {
+    padding: 10px 16px;
+  }
 }
 
 .order-product-name {
