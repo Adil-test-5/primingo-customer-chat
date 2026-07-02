@@ -104,15 +104,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  function toMs(ts) {
+    if (!ts) return null;
+    if (typeof ts === 'string') return new Date(ts).getTime();
+    if (ts > 1e12) return ts;
+    return ts * 1000;
+  }
+
+  function getSortTs(msg) {
+    const serverTs = toMs(msg.created_at);
+    if (serverTs) return serverTs;
+    if (msg.client_created_at_ms) return msg.client_created_at_ms;
+    return Infinity;
+  }
+
   function sortMessages() {
+    localMessages.forEach(msg => {
+      msg.sort_ts_ms = getSortTs(msg);
+    });
     localMessages.sort((a, b) => {
-      const aTime = a.created_at || a.client_created_at || Infinity;
-      const bTime = b.created_at || b.client_created_at || Infinity;
-      if (aTime !== bTime) return aTime - bTime;
+      if (a.sort_ts_ms !== b.sort_ts_ms) return a.sort_ts_ms - b.sort_ts_ms;
       const aId = a.serverId || Infinity;
       const bId = b.serverId || Infinity;
       return aId - bId;
     });
+    console.log('[MSG_ORDER]', localMessages.map(m => ({
+      content: m.content?.substring(0, 40),
+      sender: m.sender,
+      created_at_raw: m.created_at,
+      sort_ts_ms: m.sort_ts_ms,
+      chatwoot_id: m.serverId
+    })));
   }
 
   function renderAllMessages() {
@@ -143,8 +165,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function addLocalMessage(text) {
     const localId = 'local_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-    const msg = { localId, content: text, sender: 'customer', status: 'queued', serverId: null, created_at: null, client_created_at: Math.floor(Date.now() / 1000) };
+    const msg = { localId, content: text, sender: 'customer', status: 'queued', serverId: null, created_at: null, client_created_at_ms: Date.now(), sort_ts_ms: null };
     localMessages.push(msg);
+    sortMessages();
     renderAllMessages();
     return msg;
   }
@@ -159,6 +182,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (createdAt) {
         msg.created_at = createdAt;
+        msg.client_created_at_ms = null;
       }
     }
     sortMessages();
@@ -261,6 +285,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             match.serverId = serverMsg.id;
             match.status = 'delivered';
             match.created_at = serverMsg.created_at;
+            match.client_created_at_ms = null;
             knownServerIds.add(serverMsg.id);
             changed = true;
             return;
@@ -274,7 +299,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           sender: serverMsg.sender,
           status: serverMsg.sender === 'customer' ? 'delivered' : undefined,
           serverId: serverMsg.id,
-          created_at: serverMsg.created_at
+          created_at: serverMsg.created_at,
+          client_created_at_ms: null,
+          sort_ts_ms: null
         });
         changed = true;
       });
@@ -298,10 +325,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const newLastSeen = data.agent_last_seen;
         if (newLastSeen !== agentLastSeen) {
           agentLastSeen = newLastSeen;
+          const agentLastSeenMs = toMs(agentLastSeen);
           let changed = false;
           localMessages.forEach(msg => {
             if (msg.sender === 'customer' && msg.serverId && msg.created_at && msg.status !== 'read') {
-              if (msg.created_at <= agentLastSeen) {
+              const msgMs = toMs(msg.created_at);
+              if (msgMs && agentLastSeenMs && msgMs <= agentLastSeenMs) {
                 msg.status = 'read';
                 changed = true;
               }
