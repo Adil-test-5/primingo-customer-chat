@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Primingo Support Chat</title>
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -38,7 +38,10 @@
       </div>
       <div class="order-panel hidden" id="order-panel">
         <div class="order-card">
-          <div class="order-card-header">Selected Order</div>
+          <div class="order-card-header">
+            <span>Selected Order</span>
+            <button class="order-toggle-btn" id="order-toggle-btn" aria-label="Toggle order details">▼</button>
+          </div>
           <div class="order-card-body" id="order-card-body"></div>
           <div class="order-card-actions">
             <button class="action-btn primary" id="btn-send-order">Send Order Details</button>

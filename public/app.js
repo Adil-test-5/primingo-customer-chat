@@ -366,6 +366,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // --- Mobile order panel toggle ---
+  const orderToggleBtn = document.getElementById('order-toggle-btn');
+  if (orderToggleBtn) {
+    orderToggleBtn.addEventListener('click', () => {
+      orderPanel.classList.toggle('collapsed');
+      orderToggleBtn.textContent = orderPanel.classList.contains('collapsed') ? '▶' : '▼';
+    });
+    if (window.innerWidth <= 768) {
+      orderPanel.classList.add('collapsed');
+      orderToggleBtn.textContent = '▶';
+    }
+  }
+
   // --- Init ---
   showNotice('Verifying session...');
 

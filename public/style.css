@@ -83,9 +83,18 @@ body {
 @media (max-width: 768px) {
   .site-header-inner {
     padding: 10px 16px;
+    height: 56px;
+    justify-content: space-between;
+  }
+  .site-logo img {
+    height: 32px;
   }
   .site-nav {
     display: none;
+  }
+  .site-btn {
+    font-size: 0.72rem;
+    padding: 7px 12px;
   }
 }
 
@@ -111,6 +120,8 @@ body {
     flex-direction: column-reverse;
     padding: 0;
     gap: 0;
+    height: calc(100dvh - 56px);
+    overflow: hidden;
   }
 }
 
@@ -158,6 +169,8 @@ body {
   .chat-panel {
     flex: 1;
     border-radius: 0;
+    min-height: 0;
+    overflow: hidden;
   }
 }
 
@@ -165,6 +178,7 @@ body {
   flex: 1;
   padding: 16px;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -175,6 +189,7 @@ body {
 .chat-composer {
   display: flex;
   padding: 12px 16px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
   border-top: 1px solid #e8eaed;
   gap: 8px;
   flex-shrink: 0;
@@ -227,6 +242,36 @@ body {
 @media (max-width: 768px) {
   .order-panel {
     width: 100%;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .order-panel .order-card {
+    border-radius: 0;
+    box-shadow: none;
+    border-bottom: 1px solid #e5e5e5;
+  }
+
+  .order-panel .order-card-body {
+    padding: 12px 16px;
+    gap: 8px;
+  }
+
+  .order-panel .order-product-name {
+    font-size: 0.95rem;
+  }
+
+  .order-panel .order-card-actions {
+    padding: 10px 16px;
+  }
+
+  .order-panel .action-btn {
+    width: 100%;
+  }
+
+  .order-panel.collapsed .order-card-body,
+  .order-panel.collapsed .order-card-actions {
+    display: none;
   }
 }
 
@@ -245,6 +290,25 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.8px;
   padding: 12px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.order-toggle-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 0.72rem;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+@media (max-width: 768px) {
+  .order-toggle-btn {
+    display: inline-block;
+  }
 }
 
 .order-card-body {
@@ -353,7 +417,14 @@ body {
   font-size: 0.88rem;
   line-height: 1.45;
   word-wrap: break-word;
+  overflow-wrap: break-word;
   white-space: pre-wrap;
+}
+
+@media (max-width: 768px) {
+  .msg-bubble {
+    max-width: 82%;
+  }
 }
 
 .msg-bubble.customer {
