@@ -83,6 +83,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     messageInput.focus();
   }
 
+  function isNearBottom() {
+    const threshold = 80;
+    return messagesArea.scrollHeight - messagesArea.scrollTop - messagesArea.clientHeight < threshold;
+  }
+
   function scrollToBottom() {
     messagesArea.scrollTop = messagesArea.scrollHeight;
   }
@@ -99,12 +104,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  function sortMessages() {
+    localMessages.sort((a, b) => {
+      const aTime = a.created_at || a.client_created_at || Infinity;
+      const bTime = b.created_at || b.client_created_at || Infinity;
+      if (aTime !== bTime) return aTime - bTime;
+      const aId = a.serverId || Infinity;
+      const bId = b.serverId || Infinity;
+      return aId - bId;
+    });
+  }
+
   function renderAllMessages() {
+    const wasNearBottom = isNearBottom();
     messagesArea.innerHTML = '';
     localMessages.forEach(msg => {
       messagesArea.appendChild(createBubble(msg));
     });
-    scrollToBottom();
+    if (wasNearBottom) scrollToBottom();
   }
 
   function createBubble(msg) {
@@ -126,13 +143,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function addLocalMessage(text) {
     const localId = 'local_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-    const msg = { localId, content: text, sender: 'customer', status: 'queued', serverId: null, created_at: null };
+    const msg = { localId, content: text, sender: 'customer', status: 'queued', serverId: null, created_at: null, client_created_at: Math.floor(Date.now() / 1000) };
     localMessages.push(msg);
     renderAllMessages();
     return msg;
   }
 
-  function updateLocalMessageStatus(localId, status, serverId) {
+  function updateLocalMessageStatus(localId, status, serverId, createdAt) {
     const msg = localMessages.find(m => m.localId === localId);
     if (msg) {
       msg.status = status;
@@ -140,7 +157,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         msg.serverId = serverId;
         knownServerIds.add(serverId);
       }
+      if (createdAt) {
+        msg.created_at = createdAt;
+      }
     }
+    sortMessages();
     renderAllMessages();
   }
 
@@ -167,7 +188,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (res.ok) {
           const data = await res.json();
-          updateLocalMessageStatus(item.localId, 'delivered', data.message_id);
+          updateLocalMessageStatus(item.localId, 'delivered', data.message_id, data.created_at);
         } else {
           updateLocalMessageStatus(item.localId, 'failed');
         }
@@ -221,7 +242,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       let changed = false;
 
       data.messages.forEach(serverMsg => {
-        if (knownServerIds.has(serverMsg.id)) return;
+        if (knownServerIds.has(serverMsg.id)) {
+          const existing = localMessages.find(m => m.serverId === serverMsg.id);
+          if (existing && existing.created_at !== serverMsg.created_at) {
+            existing.created_at = serverMsg.created_at;
+            changed = true;
+          }
+          return;
+        }
 
         if (serverMsg.sender === 'customer') {
           const match = localMessages.find(m =>
@@ -252,11 +280,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
 
       if (changed) {
-        localMessages.sort((a, b) => {
-          const aTime = a.created_at || Infinity;
-          const bTime = b.created_at || Infinity;
-          return aTime - bTime;
-        });
+        sortMessages();
         renderAllMessages();
       }
     } catch (err) {}

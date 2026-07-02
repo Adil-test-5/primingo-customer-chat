@@ -180,6 +180,10 @@ async function getMessages(conversationId) {
         sender,
         created_at: m.created_at
       };
+    })
+    .sort((a, b) => {
+      if (a.created_at !== b.created_at) return a.created_at - b.created_at;
+      return a.id - b.id;
     });
 }
 

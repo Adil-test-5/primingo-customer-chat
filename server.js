@@ -111,7 +111,7 @@ app.post('/api/messages/send', async (req, res) => {
 
     const result = await sendMessage(conversationId, message.trim());
 
-    res.json({ status: 'ok', message_id: result.id, conversation_id: conversationId });
+    res.json({ status: 'ok', message_id: result.id, created_at: result.created_at, conversation_id: conversationId });
   } catch (err) {
     res.status(502).json({ status: 'error', message: 'Failed to send message. Please try again.' });
   }
