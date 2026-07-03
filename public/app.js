@@ -84,10 +84,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  const uploadBtn = document.getElementById('upload-btn');
+  const fileInput = document.getElementById('file-input');
+
   function enableChat() {
     messageInput.disabled = false;
     messageInput.placeholder = 'Type your message...';
     sendBtn.disabled = false;
+    uploadBtn.disabled = false;
     messageInput.focus();
   }
 
@@ -158,6 +162,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     const el = document.createElement('div');
     el.className = `msg-bubble ${msg.sender}`;
 
+    let contentHtml = '';
+    const attachmentMatch = msg.content && msg.content.match(/^Customer uploaded attachment:\s*(https?:\/\/\S+)$/);
+
+    if (attachmentMatch) {
+      const url = attachmentMatch[1];
+      const isImage = /\.(jpg|jpeg|png|webp)$/i.test(url);
+      if (isImage) {
+        contentHtml = `<a href="${escapeHtml(url)}" target="_blank" rel="noopener"><img class="msg-attachment-img" src="${escapeHtml(url)}" alt="Uploaded image"></a>`;
+      } else {
+        contentHtml = `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="msg-attachment-link">📎 ${escapeHtml(msg.uploadName || 'Attached file')}</a>`;
+      }
+    } else if (msg.uploadStatus === 'uploading') {
+      contentHtml = `<div class="msg-upload-progress">⏳ Uploading ${escapeHtml(msg.uploadName || 'file')}...</div>`;
+    } else if (msg.uploadStatus === 'error') {
+      contentHtml = `<div class="msg-upload-error">❌ ${escapeHtml(msg.content)}</div>`;
+    } else {
+      contentHtml = `<div class="msg-text">${escapeHtml(msg.content)}</div>`;
+    }
+
     let metaHtml = '';
     if (msg.sender === 'customer' && msg.status) {
       metaHtml = `<div class="msg-meta">${getTickHtml(msg.status)}`;
@@ -167,7 +190,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       metaHtml += `</div>`;
     }
 
-    el.innerHTML = `<div class="msg-text">${escapeHtml(msg.content)}</div>${metaHtml}`;
+    el.innerHTML = `${contentHtml}${metaHtml}`;
     return el;
   }
 
@@ -260,6 +283,69 @@ document.addEventListener('DOMContentLoaded', async () => {
   sendBtn.addEventListener('click', handleSend);
   messageInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') handleSend();
+  });
+
+  // --- File Upload ---
+  const ALLOWED_UPLOAD_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'pdf'];
+  const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
+
+  uploadBtn.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.value && fileInput.files[0];
+    fileInput.value = '';
+    if (!file || !sessionData?.customer_email) return;
+
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!ALLOWED_UPLOAD_EXTS.includes(ext)) {
+      const errMsg = addLocalMessage('Upload failed: Only images (jpg, png, webp) and PDF files are allowed.');
+      errMsg.uploadStatus = 'error';
+      sortMessages();
+      renderAllMessages();
+      return;
+    }
+
+    if (file.size > MAX_UPLOAD_SIZE) {
+      const errMsg = addLocalMessage('Upload failed: File too large. Maximum size is 10MB.');
+      errMsg.uploadStatus = 'error';
+      sortMessages();
+      renderAllMessages();
+      return;
+    }
+
+    // Show uploading bubble
+    const localId = 'upload_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    const uploadMsg = { localId, content: '', sender: 'customer', status: 'sending', serverId: null, created_at: null, client_created_at_ms: Date.now(), sort_ts_ms: null, uploadStatus: 'uploading', uploadName: file.name };
+    localMessages.push(uploadMsg);
+    sortMessages();
+    renderAllMessages();
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('customer_email', sessionData.customer_email);
+
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+
+      if (res.ok && data.url) {
+        uploadMsg.content = `Customer uploaded attachment: ${data.url}`;
+        uploadMsg.uploadStatus = null;
+        uploadMsg.status = 'delivered';
+        uploadMsg.uploadName = data.filename || file.name;
+      } else {
+        uploadMsg.content = data.message || 'Upload failed. Please try again.';
+        uploadMsg.uploadStatus = 'error';
+        uploadMsg.status = 'failed';
+      }
+    } catch (err) {
+      uploadMsg.content = 'Upload failed. Please try again.';
+      uploadMsg.uploadStatus = 'error';
+      uploadMsg.status = 'failed';
+    }
+
+    sortMessages();
+    renderAllMessages();
   });
 
   async function loadHistory() {

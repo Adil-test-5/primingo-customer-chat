@@ -535,3 +535,64 @@ body {
   color: #c0392b;
   background: #fdecea;
 }
+
+/* Upload Button */
+.composer-icon-btn {
+  width: 40px;
+  height: 40px;
+  background: transparent;
+  color: #213F91;
+  border: 1.5px solid #dde0e4;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.composer-icon-btn:hover:not(:disabled) {
+  background: #f5f7fb;
+  border-color: #213F91;
+}
+
+.composer-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Upload Attachment Previews */
+.msg-attachment-img {
+  max-width: 220px;
+  max-height: 200px;
+  border-radius: 8px;
+  display: block;
+  cursor: pointer;
+}
+
+.msg-attachment-link {
+  display: inline-block;
+  padding: 6px 12px;
+  background: #f0f2f5;
+  border-radius: 8px;
+  color: #213F91;
+  font-size: 0.82rem;
+  font-weight: 500;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.msg-attachment-link:hover {
+  background: #e3e7ef;
+}
+
+.msg-upload-progress {
+  font-size: 0.82rem;
+  color: #666;
+}
+
+.msg-upload-error {
+  font-size: 0.82rem;
+  color: #c0392b;
+}
