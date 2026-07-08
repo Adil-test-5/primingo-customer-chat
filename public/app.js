@@ -173,6 +173,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else {
         contentHtml = `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="msg-attachment-link">📎 ${escapeHtml(msg.uploadName || 'Attached file')}</a>`;
       }
+    } else if (msg.attachments && msg.attachments.length > 0) {
+      // Admin attachments from Chatwoot (re-hosted on R2)
+      if (msg.content && msg.content.trim()) {
+        contentHtml = `<div class="msg-text">${escapeHtml(msg.content)}</div>`;
+      }
+      msg.attachments.forEach(att => {
+        const url = att.url;
+        const isImage = att.type === 'image' || /\.(jpg|jpeg|png|webp|gif)$/i.test(url);
+        if (isImage) {
+          contentHtml += `<a href="${escapeHtml(url)}" target="_blank" rel="noopener"><img class="msg-attachment-img" src="${escapeHtml(url)}" alt="Attached image"></a>`;
+        } else {
+          contentHtml += `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="msg-attachment-link">📎 Attached file</a>`;
+        }
+      });
     } else if (msg.uploadStatus === 'uploading') {
       contentHtml = `<div class="msg-upload-progress">⏳ Uploading ${escapeHtml(msg.uploadName || 'file')}...</div>`;
     } else if (msg.uploadStatus === 'error') {
@@ -362,9 +376,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       data.messages.forEach(serverMsg => {
         if (knownServerIds.has(serverMsg.id)) {
           const existing = localMessages.find(m => m.serverId === serverMsg.id);
-          if (existing && existing.created_at !== serverMsg.created_at) {
-            existing.created_at = serverMsg.created_at;
-            changed = true;
+          if (existing) {
+            if (existing.created_at !== serverMsg.created_at) {
+              existing.created_at = serverMsg.created_at;
+              changed = true;
+            }
+            // Update attachments if they appeared after initial load
+            if (serverMsg.attachments && serverMsg.attachments.length > 0 && !existing.attachments) {
+              existing.attachments = serverMsg.attachments;
+              changed = true;
+            }
           }
           return;
         }
@@ -395,7 +416,8 @@ document.addEventListener('DOMContentLoaded', async () => {
           serverId: serverMsg.id,
           created_at: serverMsg.created_at,
           client_created_at_ms: null,
-          sort_ts_ms: null
+          sort_ts_ms: null,
+          attachments: serverMsg.attachments || null
         });
         changed = true;
       });

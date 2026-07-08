@@ -1,11 +1,30 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const path = require('path');
 const { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta } = require('./chatwoot');
 const uploadRouter = require('./upload');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// CORS — env-driven with hardcoded fallback
+const DEFAULT_ORIGINS = [
+  'https://primingo.com',
+  'https://www.primingo.com',
+  'https://chat.primingo.com'
+];
+
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : DEFAULT_ORIGINS;
+
+app.use(cors({
+  origin: allowedOrigins,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false
+}));
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
