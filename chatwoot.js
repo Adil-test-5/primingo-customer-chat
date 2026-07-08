@@ -402,4 +402,87 @@ async function getConversationMeta(conversationId) {
   return { agentRead, agentLastSeen };
 }
 
-module.exports = { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta };
+async function findOrCreateSupportConversation(contactId, supportKey, contextData) {
+  const session = getSession(supportKey);
+
+  if (session?.conversation_id) {
+    return { conversationId: session.conversation_id, isNew: false };
+  }
+
+  // Search existing conversations for this contact, find one labeled general-support
+  const searchRes = await fetch(apiUrl(`/contacts/${contactId}/conversations`), {
+    headers: headers()
+  });
+
+  if (searchRes.ok) {
+    const searchData = await searchRes.json();
+    const conversations = searchData.payload || [];
+    const supportConv = conversations.find(c =>
+      (c.status === 'open' || c.status === 'pending') &&
+      c.labels && c.labels.includes('general-support')
+    );
+    if (supportConv) {
+      saveSession(supportKey, {
+        contact_id: contactId,
+        conversation_id: supportConv.id,
+        support_context_sent: true
+      });
+      return { conversationId: supportConv.id, isNew: false };
+    }
+  }
+
+  // Create new support conversation
+  const createRes = await fetch(apiUrl('/conversations'), {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      inbox_id: parseInt(CHATWOOT_INBOX_ID()),
+      contact_id: contactId,
+      status: 'open'
+    })
+  });
+
+  if (!createRes.ok) {
+    throw new Error('Failed to create support conversation');
+  }
+
+  const conv = await createRes.json();
+  const conversationId = conv.id;
+
+  // Apply general-support label
+  await fetch(apiUrl(`/conversations/${conversationId}/labels`), {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ labels: ['general-support'] })
+  });
+
+  saveSession(supportKey, {
+    contact_id: contactId,
+    conversation_id: conversationId,
+    support_context_sent: false
+  });
+
+  return { conversationId, isNew: true };
+}
+
+async function sendSupportContext(conversationId, contextData) {
+  const contextMessage = [
+    `--- General Support Chat ---`,
+    `Customer ID: ${contextData.customer_id || 'Guest'}`,
+    `Name: ${contextData.name}`,
+    `Email: ${contextData.email}`,
+    `Source: Primingo General Support`
+  ].join('\n');
+
+  await fetch(apiUrl(`/conversations/${conversationId}/messages`), {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      content: contextMessage,
+      message_type: 'incoming',
+      private: true
+    })
+  });
+}
+
+module.exports = { findOrCreateContact, findOrCreateConversation, findOrCreateSupportConversation, sendOrderContext, sendSupportContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta };

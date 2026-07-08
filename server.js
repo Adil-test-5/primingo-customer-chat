@@ -1,8 +1,11 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const crypto = require('crypto');
 const path = require('path');
-const { findOrCreateContact, findOrCreateConversation, sendOrderContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta } = require('./chatwoot');
+const multer = require('multer');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { findOrCreateContact, findOrCreateConversation, findOrCreateSupportConversation, sendOrderContext, sendSupportContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta } = require('./chatwoot');
 const uploadRouter = require('./upload');
 
 const app = express();
@@ -36,6 +39,10 @@ app.get('/', (req, res) => {
 
 app.get('/order-chat', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get('/support', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'support.html'));
 });
 
 app.post('/api/session/verify', async (req, res) => {
@@ -213,6 +220,268 @@ app.get('/api/messages/read-status', async (req, res) => {
     res.json({ status: 'ok', agent_read: meta.agentRead, agent_last_seen: meta.agentLastSeen });
   } catch (err) {
     res.json({ status: 'ok', agent_read: false, agent_last_seen: null });
+  }
+});
+
+// --- Support API ---
+
+function generateSupportKey(type, identifier) {
+  if (type === 'customer') {
+    return `support_customer_${identifier}`;
+  }
+  // Guest: hash email
+  const normalized = identifier.trim().toLowerCase();
+  const hash = crypto.createHash('sha256').update(normalized).digest('hex');
+  return `support_guest_${hash}`;
+}
+
+function verifySignedToken(token) {
+  const secret = process.env.PRIMINGO_SUPPORT_TOKEN_SECRET;
+  if (!secret) return null;
+
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 2) return null;
+
+    const [payloadB64, signature] = parts;
+    const expectedSig = crypto.createHmac('sha256', secret).update(payloadB64).digest('hex');
+
+    if (signature !== expectedSig) return null;
+
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString('utf8'));
+
+    // Reject expired tokens (15 min window)
+    if (payload.timestamp) {
+      const age = Date.now() - payload.timestamp;
+      if (age > 15 * 60 * 1000 || age < -60000) return null;
+    }
+
+    if (!payload.customer_id || !payload.email) return null;
+
+    return payload;
+  } catch (err) {
+    return null;
+  }
+}
+
+app.post('/api/support/verify', async (req, res) => {
+  const { token, name, email } = req.body;
+
+  let supportKey, customerName, customerEmail, customerId;
+
+  if (token) {
+    // Logged-in customer via signed token
+    const payload = verifySignedToken(token);
+    if (!payload) {
+      return res.status(401).json({ status: 'error', message: 'Invalid or expired token.' });
+    }
+    customerId = payload.customer_id;
+    customerEmail = payload.email;
+    customerName = payload.name || 'Customer';
+    supportKey = generateSupportKey('customer', customerId);
+  } else if (email) {
+    // Guest flow
+    customerEmail = email.trim().toLowerCase();
+    customerName = (name || 'Guest').trim();
+    customerId = null;
+    supportKey = generateSupportKey('guest', customerEmail);
+  } else {
+    return res.status(400).json({ status: 'error', message: 'Provide a token or name/email.' });
+  }
+
+  const cwBase = process.env.CHATWOOT_BASE_URL;
+  const cwToken = process.env.CHATWOOT_API_TOKEN;
+  if (!cwBase || !cwToken) {
+    return res.status(500).json({ status: 'error', message: 'Chat service not configured.' });
+  }
+
+  try {
+    const contactId = await findOrCreateContact(customerEmail, customerName);
+    const { conversationId, isNew } = await findOrCreateSupportConversation(contactId, supportKey, {
+      customer_id: customerId,
+      name: customerName,
+      email: customerEmail
+    });
+
+    // Send context message only on first creation
+    const session = getSession(supportKey);
+    if (session && !session.support_context_sent) {
+      await sendSupportContext(conversationId, {
+        customer_id: customerId,
+        name: customerName,
+        email: customerEmail
+      });
+      saveSession(supportKey, { ...session, support_context_sent: true });
+    }
+
+    res.json({
+      status: 'ok',
+      support_key: supportKey,
+      name: customerName,
+      email: customerEmail
+    });
+  } catch (err) {
+    console.error('[SUPPORT] Verify error:', err.message);
+    res.status(502).json({ status: 'error', message: 'Failed to start support chat.' });
+  }
+});
+
+app.post('/api/support/send', async (req, res) => {
+  const { message, support_key } = req.body;
+
+  if (!message || !message.trim()) {
+    return res.status(400).json({ status: 'error', message: 'Message cannot be empty.' });
+  }
+
+  if (!support_key) {
+    return res.status(400).json({ status: 'error', message: 'Support session not verified.' });
+  }
+
+  const session = getSession(support_key);
+  if (!session?.conversation_id) {
+    return res.status(400).json({ status: 'error', message: 'Support session not found.' });
+  }
+
+  try {
+    const result = await sendMessage(session.conversation_id, message.trim());
+    res.json({ status: 'ok', message_id: result.id, created_at: result.created_at, conversation_id: session.conversation_id });
+  } catch (err) {
+    res.status(502).json({ status: 'error', message: 'Failed to send message.' });
+  }
+});
+
+app.get('/api/support/history', async (req, res) => {
+  const { support_key } = req.query;
+
+  if (!support_key) {
+    return res.status(400).json({ status: 'error', message: 'Support session not verified.' });
+  }
+
+  const session = getSession(support_key);
+  if (!session?.conversation_id) {
+    return res.json({ status: 'ok', messages: [] });
+  }
+
+  try {
+    const messages = await getMessages(session.conversation_id);
+    res.json({ status: 'ok', messages });
+  } catch (err) {
+    res.status(502).json({ status: 'error', message: 'Failed to load messages.' });
+  }
+});
+
+app.post('/api/support/mark-read', async (req, res) => {
+  const { support_key } = req.body;
+
+  if (!support_key) {
+    return res.status(400).json({ status: 'error', message: 'Support session not verified.' });
+  }
+
+  const session = getSession(support_key);
+  if (!session?.conversation_id) {
+    return res.json({ status: 'ok' });
+  }
+
+  try {
+    await markConversationRead(session.conversation_id);
+    res.json({ status: 'ok' });
+  } catch (err) {
+    res.json({ status: 'ok' });
+  }
+});
+
+app.get('/api/support/read-status', async (req, res) => {
+  const { support_key } = req.query;
+
+  if (!support_key) {
+    return res.status(400).json({ status: 'error', message: 'Support session not verified.' });
+  }
+
+  const session = getSession(support_key);
+  if (!session?.conversation_id) {
+    return res.json({ status: 'ok', agent_read: false, agent_last_seen: null });
+  }
+
+  try {
+    const meta = await getConversationMeta(session.conversation_id);
+    res.json({ status: 'ok', agent_read: meta.agentRead, agent_last_seen: meta.agentLastSeen });
+  } catch (err) {
+    res.json({ status: 'ok', agent_read: false, agent_last_seen: null });
+  }
+});
+
+// --- Support File Upload ---
+
+const supportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }
+});
+
+const SUPPORT_ALLOWED_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'pdf']);
+const SUPPORT_MIME_MAP = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  png: 'image/png', webp: 'image/webp', pdf: 'application/pdf'
+};
+
+app.post('/api/support/upload', supportUpload.single('file'), async (req, res) => {
+  try {
+    const supportKey = req.body.support_key;
+    if (!supportKey) {
+      return res.status(400).json({ status: 'error', message: 'Support session not verified.' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ status: 'error', message: 'No file provided.' });
+    }
+
+    const ext = path.extname(req.file.originalname).toLowerCase().replace('.', '');
+    if (!SUPPORT_ALLOWED_EXTS.has(ext)) {
+      return res.status(400).json({ status: 'error', message: 'Only images (jpg, png, webp) and PDF files are allowed.' });
+    }
+
+    if (!process.env.R2_ENDPOINT || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET_NAME) {
+      return res.status(500).json({ status: 'error', message: 'File upload service not configured.' });
+    }
+
+    const session = getSession(supportKey);
+    if (!session?.conversation_id) {
+      return res.status(400).json({ status: 'error', message: 'Support session not found.' });
+    }
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const randomName = crypto.randomUUID();
+    const objectKey = `chat-uploads/${year}/${month}/support/${randomName}.${ext}`;
+
+    const s3 = new S3Client({
+      region: 'auto',
+      endpoint: process.env.R2_ENDPOINT,
+      credentials: {
+        accessKeyId: process.env.R2_ACCESS_KEY_ID,
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY
+      }
+    });
+
+    await s3.send(new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME,
+      Key: objectKey,
+      Body: req.file.buffer,
+      ContentType: SUPPORT_MIME_MAP[ext] || 'application/octet-stream'
+    }));
+
+    const baseUrl = process.env.R2_PUBLIC_BASE_URL.replace(/\/$/, '');
+    const fileUrl = `${baseUrl}/${objectKey}`;
+
+    await sendMessage(session.conversation_id, `Customer uploaded attachment: ${fileUrl}`);
+
+    res.json({ status: 'ok', url: fileUrl, filename: req.file.originalname });
+  } catch (err) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ status: 'error', message: 'File too large. Maximum size is 10MB.' });
+    }
+    console.error('[SUPPORT UPLOAD ERROR]', err.message);
+    res.status(502).json({ status: 'error', message: 'Upload failed. Please try again.' });
   }
 });
 
