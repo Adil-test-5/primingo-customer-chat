@@ -663,6 +663,30 @@ body {
   margin-top: 8px;
 }
 
+.guest-form-signin {
+  margin-top: 14px;
+  font-size: 0.8rem;
+  color: #555;
+  text-align: center;
+}
+
+.guest-form-signin a {
+  color: #213F91;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.guest-form-signin a:hover {
+  text-decoration: underline;
+}
+
+.guest-form-privacy {
+  margin-top: 10px;
+  font-size: 0.72rem;
+  color: #999;
+  text-align: center;
+}
+
 .guest-form-error {
   margin-top: 12px;
   font-size: 0.8rem;
