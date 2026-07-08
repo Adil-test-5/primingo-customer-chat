@@ -4,8 +4,10 @@ const cors = require('cors');
 const crypto = require('crypto');
 const path = require('path');
 const multer = require('multer');
+const cookieParser = require('cookie-parser');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { findOrCreateContact, findOrCreateConversation, findOrCreateSupportConversation, sendOrderContext, sendSupportContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta } = require('./chatwoot');
+const { isNonceUsed, markNonceUsed, createOrderSession, getOrderSession, revokeOrderSessions } = require('./order-sessions');
 const uploadRouter = require('./upload');
 
 const app = express();
@@ -26,9 +28,10 @@ app.use(cors({
   origin: allowedOrigins,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: false
+  credentials: true
 }));
 
+app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(uploadRouter);
@@ -41,6 +44,199 @@ app.get('/order-chat', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+app.get('/order-chat/start', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// --- Order Chat Token Helpers ---
+
+const THIRTY_DAYS_SEC = 30 * 24 * 60 * 60;
+
+function maskToken(t) {
+  if (!t || t.length < 12) return '***';
+  return t.slice(0, 6) + '...' + t.slice(-4);
+}
+
+function verifyOrderChatToken(token) {
+  const secret = process.env.PRIMINGO_ORDER_CHAT_TOKEN_SECRET;
+  if (!secret) return null;
+
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 2) return null;
+
+    const [payloadB64, signature] = parts;
+    const expectedSig = crypto.createHmac('sha256', secret).update(payloadB64).digest('hex');
+
+    if (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSig, 'hex'))) return null;
+
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString('utf8'));
+
+    // 24h expiry
+    if (payload.timestamp) {
+      const age = Date.now() - payload.timestamp;
+      if (age > 24 * 60 * 60 * 1000 || age < -60000) return null;
+    } else {
+      return null;
+    }
+
+    if (!payload.order_id || !payload.item_id || !payload.jti) return null;
+    if (!payload.customer_email && !payload.customer_id) return null;
+
+    return payload;
+  } catch (err) {
+    return null;
+  }
+}
+
+function setOrderSessionCookie(res, sessionId) {
+  res.cookie('order_chat_session', sessionId, {
+    httpOnly: true,
+    secure: process.env.ORDER_CHAT_COOKIE_SECURE !== 'false',
+    sameSite: 'lax',
+    maxAge: THIRTY_DAYS_SEC * 1000,
+    path: '/'
+  });
+}
+
+// --- Order Chat Token Exchange ---
+
+app.post('/api/order-chat/exchange', async (req, res) => {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ status: 'error', message: 'Missing token.' });
+  }
+
+  console.log('[ORDER-CHAT] Exchange attempt:', maskToken(token));
+
+  const payload = verifyOrderChatToken(token);
+  if (!payload) {
+    console.warn('[ORDER-CHAT] Invalid/expired token:', maskToken(token));
+    return res.status(401).json({ status: 'error', message: 'Invalid or expired token. Please open chat from Primingo My Products.' });
+  }
+
+  // One-time use check
+  if (isNonceUsed(payload.jti)) {
+    console.warn('[ORDER-CHAT] Nonce already used:', payload.jti);
+    return res.status(401).json({ status: 'error', message: 'This link has already been used. Please open a new chat from Primingo My Products.' });
+  }
+
+  // Verify with WordPress
+  const wpBaseUrl = process.env.WORDPRESS_BASE_URL;
+  if (!wpBaseUrl) {
+    return res.status(500).json({ status: 'error', message: 'Service configuration error.' });
+  }
+
+  try {
+    // NOTE: This calls WordPress verify-session with customer_email instead of chat_token.
+    // The WordPress endpoint must be updated to accept this format for the new secure flow.
+    // Until then, this exchange endpoint requires the upcoming WordPress token button update.
+    const wpRes = await fetch(`${wpBaseUrl}/wp-json/primingo-chat/v1/verify-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        order_id: payload.order_id,
+        item_id: payload.item_id,
+        customer_email: payload.customer_email
+      })
+    });
+
+    if (!wpRes.ok) {
+      const wpError = await wpRes.json().catch(() => null);
+      const message = wpError?.message || 'Session verification failed.';
+      return res.status(wpRes.status).json({ status: 'error', message });
+    }
+
+    const wpData = await wpRes.json();
+
+    // Mark nonce as used
+    markNonceUsed(payload.jti);
+
+    // Create server-side session
+    const sessionId = crypto.randomUUID();
+    const sessionData = {
+      order_id: wpData.order_id || payload.order_id,
+      item_id: wpData.item_id || payload.item_id,
+      customer_name: wpData.customer_name,
+      customer_email: wpData.customer_email || payload.customer_email,
+      product: wpData.product,
+      plan: wpData.plan,
+      order_status: wpData.status,
+      purchase_date: wpData.purchase_date,
+      expiry_date: wpData.expiry_date,
+      days_left: wpData.days_left
+    };
+
+    createOrderSession(sessionId, sessionData);
+
+    // Set HttpOnly cookie
+    setOrderSessionCookie(res, sessionId);
+
+    console.log('[ORDER-CHAT] Session created for order:', payload.order_id);
+
+    res.json({
+      status: 'ok',
+      session_type: 'order',
+      ...sessionData
+    });
+  } catch (err) {
+    console.error('[ORDER-CHAT] Exchange error:', err.message);
+    res.status(502).json({ status: 'error', message: 'Unable to verify session.' });
+  }
+});
+
+// --- Order Chat Cookie Session Check ---
+
+app.post('/api/order-chat/session', (req, res) => {
+  const sessionId = req.cookies?.order_chat_session;
+  if (!sessionId) {
+    return res.status(401).json({ status: 'error', message: 'Please open this chat from your Primingo account.' });
+  }
+
+  const session = getOrderSession(sessionId);
+  if (!session) {
+    // Clear stale cookie
+    res.clearCookie('order_chat_session', { path: '/' });
+    return res.status(401).json({ status: 'error', message: 'Session expired. Please open this chat from your Primingo account.' });
+  }
+
+  res.json({
+    status: 'ok',
+    session_type: 'order',
+    customer_name: session.customer_name,
+    customer_email: session.customer_email,
+    order_id: session.order_id,
+    item_id: session.item_id,
+    product: session.product,
+    plan: session.plan,
+    order_status: session.order_status,
+    purchase_date: session.purchase_date,
+    expiry_date: session.expiry_date,
+    days_left: session.days_left
+  });
+});
+
+// --- Order Chat Revocation ---
+
+app.post('/api/order-chat/revoke', (req, res) => {
+  const { order_id, item_id, admin_secret } = req.body;
+
+  // Simple shared-secret auth for admin revocation
+  const expectedSecret = process.env.PRIMINGO_ORDER_CHAT_TOKEN_SECRET;
+  if (!expectedSecret || admin_secret !== expectedSecret) {
+    return res.status(403).json({ status: 'error', message: 'Forbidden.' });
+  }
+
+  if (!order_id || !item_id) {
+    return res.status(400).json({ status: 'error', message: 'Missing order_id or item_id.' });
+  }
+
+  const revoked = revokeOrderSessions(order_id, item_id);
+  console.log('[ORDER-CHAT] Revoked', revoked, 'sessions for order:', order_id, 'item:', item_id);
+  res.json({ status: 'ok', revoked });
+});
+
 app.get('/support', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'support.html'));
 });
@@ -51,6 +247,17 @@ app.post('/api/session/verify', async (req, res) => {
   if (type === 'general') {
     return res.json({ status: 'ok', session_type: 'general', message: 'General Support' });
   }
+
+  // Legacy flow — can be disabled via env
+  const legacyEnabled = process.env.ORDER_CHAT_LEGACY_ENABLED !== 'false';
+  if (!legacyEnabled) {
+    return res.status(401).json({
+      status: 'error',
+      message: 'Please open this chat from your Primingo account.'
+    });
+  }
+
+  console.warn('[ORDER-CHAT] Legacy token flow used for order:', order_id);
 
   if (!order_id || !item_id) {
     return res.status(400).json({ status: 'error', message: 'Missing order_id or item_id.' });
@@ -83,19 +290,28 @@ app.post('/api/session/verify', async (req, res) => {
 
     const wpData = await wpRes.json();
 
-    const safeData = {
-      status: 'ok',
-      session_type: 'order',
-      customer_name: wpData.customer_name,
-      customer_email: wpData.customer_email,
+    // Create secure session for legacy flow too
+    const sessionId = crypto.randomUUID();
+    const sessionData = {
       order_id: wpData.order_id,
       item_id: wpData.item_id,
+      customer_name: wpData.customer_name,
+      customer_email: wpData.customer_email,
       product: wpData.product,
       plan: wpData.plan,
       order_status: wpData.status,
       purchase_date: wpData.purchase_date,
       expiry_date: wpData.expiry_date,
       days_left: wpData.days_left
+    };
+
+    createOrderSession(sessionId, sessionData);
+    setOrderSessionCookie(res, sessionId);
+
+    const safeData = {
+      status: 'ok',
+      session_type: 'order',
+      ...sessionData
     };
 
     res.json(safeData);

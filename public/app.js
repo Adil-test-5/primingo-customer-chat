@@ -505,48 +505,114 @@ document.addEventListener('DOMContentLoaded', async () => {
   // --- Init ---
   showNotice('Verifying session...');
 
-  const body = {};
-  if (type === 'general') {
-    body.type = 'general';
-  } else {
-    body.order_id = orderId;
-    body.item_id = itemId;
-    body.chat_token = params.get('chat_token');
+  // Clean tracking params from URL
+  function cleanUrl() {
+    const cleanParams = new URLSearchParams(window.location.search);
+    ['order_id', 'item_id', 'chat_token', 't', '_gl', '_ga', '_gcl_au'].forEach(p => cleanParams.delete(p));
+    const clean = cleanParams.toString();
+    const newUrl = window.location.pathname + (clean ? '?' + clean : '');
+    history.replaceState({}, '', newUrl);
+  }
+
+  // New secure token exchange flow
+  const signedToken = params.get('t');
+
+  async function exchangeToken(token) {
+    const res = await fetch('/api/order-chat/exchange', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ token })
+    });
+    return { res, data: await res.json() };
+  }
+
+  async function checkCookieSession() {
+    const res = await fetch('/api/order-chat/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin'
+    });
+    return { res, data: await res.json() };
+  }
+
+  function startOrderChat(data) {
+    sessionData = data;
+    contextInfo.textContent = `${data.customer_name} — Order #${data.order_id}`;
+    showOrderBanner(data);
+    showOrderPanel(data);
+    messagesArea.innerHTML = '';
+    enableChat();
+    loadHistory();
+    markAdminMessagesRead();
+    startPolling();
   }
 
   try {
-    const res = await fetch('/api/session/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
+    if (signedToken) {
+      // New flow: /order-chat/start?t=SIGNED_TOKEN
+      const { res, data } = await exchangeToken(signedToken);
+      cleanUrl();
 
-    const data = await res.json();
+      if (!res.ok) {
+        showNotice(data.message, true);
+        return;
+      }
 
-    if (!res.ok) {
-      contextInfo.textContent = '';
-      showNotice(data.message, true);
-      return;
-    }
+      startOrderChat(data);
 
-    sessionData = data;
+    } else if (type === 'general') {
+      // General support redirect (legacy link in nav)
+      const body = { type: 'general' };
+      const res = await fetch('/api/session/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
 
-    if (data.session_type === 'general') {
+      if (!res.ok) {
+        showNotice(data.message, true);
+        return;
+      }
+
+      sessionData = data;
       contextInfo.textContent = 'General Support';
       messagesArea.innerHTML = '';
       enableChat();
       await loadHistory();
       markAdminMessagesRead();
       startPolling();
-    } else if (data.session_type === 'order') {
-      contextInfo.textContent = `${data.customer_name} — Order #${data.order_id}`;
-      showOrderBanner(data);
-      showOrderPanel(data);
-      messagesArea.innerHTML = '';
-      enableChat();
-      await loadHistory();
-      markAdminMessagesRead();
-      startPolling();
+
+    } else if (orderId && itemId) {
+      // Legacy flow: /order-chat/?order_id=...&item_id=...&chat_token=...
+      const body = { order_id: orderId, item_id: itemId, chat_token: params.get('chat_token') };
+      const res = await fetch('/api/session/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      cleanUrl();
+
+      if (!res.ok) {
+        showNotice(data.message, true);
+        return;
+      }
+
+      startOrderChat(data);
+
+    } else {
+      // No token, no params — check cookie session
+      const { res, data } = await checkCookieSession();
+
+      if (!res.ok) {
+        showNotice('Please open this chat from your Primingo account.', true);
+        return;
+      }
+
+      startOrderChat(data);
     }
   } catch (err) {
     showNotice('Unable to connect. Please try again later.', true);
