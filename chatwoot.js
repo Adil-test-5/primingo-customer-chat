@@ -38,6 +38,20 @@ function getR2Client() {
   });
 }
 
+function buildCandidateUrls(att) {
+  const candidates = [];
+  const fields = ['data_url', 'download_url', 'file_url', 'thumb_url'];
+
+  for (const field of fields) {
+    const val = att[field];
+    if (!val) continue;
+    const url = val.startsWith('http') ? val : `${CHATWOOT_BASE_URL()}${val}`;
+    if (!candidates.includes(url)) candidates.push(url);
+  }
+
+  return candidates;
+}
+
 async function processAttachments(attachments) {
   if (!attachments || attachments.length === 0) return [];
 
@@ -50,45 +64,59 @@ async function processAttachments(attachments) {
   const results = [];
 
   for (const att of attachments) {
-    // Chatwoot uses data_url (full URL) or file_url (relative path)
-    let sourceUrl = att.data_url;
-    if (!sourceUrl && att.file_url) {
-      // file_url may be relative — prepend Chatwoot base if needed
-      sourceUrl = att.file_url.startsWith('http')
-        ? att.file_url
-        : `${CHATWOOT_BASE_URL()}${att.file_url}`;
-    }
+    const candidates = buildCandidateUrls(att);
 
-    if (!sourceUrl) {
+    if (candidates.length === 0) {
       console.warn('[ATTACH] No source URL found in attachment:', JSON.stringify(att));
       continue;
     }
 
-    console.log('[ATTACH] Processing:', { sourceUrl, file_type: att.file_type, file_name: att.file_name });
+    console.log('[ATTACH] Candidate URLs:', candidates);
 
-    // Return cached R2 URL if already processed
-    if (cache[sourceUrl]) {
-      console.log('[ATTACH] Cache hit:', cache[sourceUrl]);
-      results.push({ url: cache[sourceUrl], type: att.file_type || 'file' });
+    // Return cached R2 URL if any candidate was already processed
+    const cachedUrl = candidates.find(u => cache[u]);
+    if (cachedUrl) {
+      console.log('[ATTACH] Cache hit:', cache[cachedUrl]);
+      results.push({ url: cache[cachedUrl], type: att.file_type || 'file' });
+      continue;
+    }
+
+    let downloaded = false;
+    let buffer = null;
+    let contentType = null;
+    let successUrl = null;
+
+    for (const url of candidates) {
+      console.log('[ATTACH] Trying URL:', url);
+      try {
+        const dlRes = await fetch(url, {
+          headers: { 'api_access_token': CHATWOOT_API_TOKEN() }
+        });
+
+        if (!dlRes.ok) {
+          console.warn('[ATTACH] Failed URL:', url, '—', dlRes.status, dlRes.statusText);
+          continue;
+        }
+
+        buffer = Buffer.from(await dlRes.arrayBuffer());
+        contentType = dlRes.headers.get('content-type');
+        successUrl = url;
+        downloaded = true;
+        console.log('[ATTACH] Successful URL:', url, '—', buffer.length, 'bytes');
+        break;
+      } catch (err) {
+        console.warn('[ATTACH] Failed URL:', url, '—', err.message);
+      }
+    }
+
+    if (!downloaded) {
+      console.error('[ATTACH] All candidate URLs failed for attachment:', att.file_name || JSON.stringify(att));
       continue;
     }
 
     try {
-      // Download from Chatwoot (authenticated)
-      const dlRes = await fetch(sourceUrl, {
-        headers: { 'api_access_token': CHATWOOT_API_TOKEN() }
-      });
-
-      if (!dlRes.ok) {
-        console.error('[ATTACH] Download failed:', dlRes.status, dlRes.statusText, sourceUrl);
-        continue;
-      }
-
-      const buffer = Buffer.from(await dlRes.arrayBuffer());
-      console.log('[ATTACH] Downloaded:', buffer.length, 'bytes');
-
       // Determine extension from original filename or content type
-      const ext = getExtFromAttachment(att, dlRes.headers.get('content-type'));
+      const ext = getExtFromAttachment(att, contentType);
       const now = new Date();
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -100,7 +128,7 @@ async function processAttachments(attachments) {
         Bucket: process.env.R2_BUCKET_NAME,
         Key: objectKey,
         Body: buffer,
-        ContentType: dlRes.headers.get('content-type') || 'application/octet-stream'
+        ContentType: contentType || 'application/octet-stream'
       }));
 
       const baseUrl = process.env.R2_PUBLIC_BASE_URL.replace(/\/$/, '');
@@ -109,10 +137,10 @@ async function processAttachments(attachments) {
       console.log('[ATTACH] Uploaded to R2:', r2Url);
 
       // Cache and return
-      cache[sourceUrl] = r2Url;
+      cache[successUrl] = r2Url;
       results.push({ url: r2Url, type: att.file_type || 'file' });
     } catch (err) {
-      console.error('[ATTACH] Error processing attachment:', err.message, sourceUrl);
+      console.error('[ATTACH] R2 upload error:', err.message);
     }
   }
 
@@ -335,6 +363,10 @@ async function getMessages(conversationId) {
       const processed = await processAttachments(m.attachments);
       if (processed.length > 0) {
         result.attachments = processed;
+      } else if (!result.content.trim()) {
+        // Attachments existed but all failed to process, and no text content — skip this message
+        console.log('[MSG] Skipping blank message (attachments failed, no content):', m.id);
+        return null;
       }
       console.log('[MSG] Final message object:', JSON.stringify(result));
     }
@@ -342,7 +374,7 @@ async function getMessages(conversationId) {
     return result;
   }));
 
-  return mapped.sort((a, b) => {
+  return mapped.filter(m => m !== null).sort((a, b) => {
     if (a.created_at !== b.created_at) return a.created_at - b.created_at;
     return a.id - b.id;
   });
