@@ -19,6 +19,255 @@ document.addEventListener('DOMContentLoaded', async () => {
   let readStatusInterval = null;
   let agentLastSeen = null;
 
+  // --- WordPress Widget Communication ---
+  const isWidget = params.get('widget') === '1';
+  const isEmbedded = window.parent !== window;
+  const ALLOWED_PARENT_ORIGINS = ['https://primingo.com', 'https://www.primingo.com'];
+
+  function getParentOrigin() {
+    try {
+      if (document.referrer) {
+        const url = new URL(document.referrer);
+        return url.origin;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  const parentOrigin = getParentOrigin();
+  const widgetEnabled = isWidget && isEmbedded && parentOrigin && ALLOWED_PARENT_ORIGINS.includes(parentOrigin);
+  let widgetIsOpen = false;
+  let widgetStateKnown = false;
+
+  function postToParent(data) {
+    if (!widgetEnabled) return;
+    window.parent.postMessage(data, parentOrigin);
+  }
+
+  if (widgetEnabled) {
+    window.addEventListener('message', (event) => {
+      if (!ALLOWED_PARENT_ORIGINS.includes(event.origin)) return;
+      if (event.source !== window.parent) return;
+      if (!event.data || event.data.source !== 'primingo-support-widget') return;
+
+      if (event.data.type === 'primingo_support_widget_state') {
+        widgetStateKnown = true;
+        const wasOpen = widgetIsOpen;
+        widgetIsOpen = !!event.data.is_open;
+
+        if (widgetIsOpen) {
+          // Widget is open — clear unread, mark read
+          clearUnreadState();
+          markAdminMessagesRead();
+          scrollToBottom();
+        } else if (!widgetIsOpen) {
+          // Widget is closed — send current unread count immediately
+          sendUnreadUpdate();
+        }
+      }
+    });
+
+    // Signal to WordPress parent that the iframe is ready
+    postToParent({
+      source: 'primingo-support-chat',
+      type: 'primingo_support_ready'
+    });
+  }
+
+  // --- Unread Notification State ---
+
+  function getNotificationStorageKey() {
+    if (!supportKey) return null;
+    return 'primingo_support_notification_state:' + supportKey;
+  }
+
+  function loadNotificationState() {
+    const key = getNotificationStorageKey();
+    if (!key) return null;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return null;
+  }
+
+  function saveNotificationState(state) {
+    const key = getNotificationStorageKey();
+    if (!key) return;
+    try {
+      localStorage.setItem(key, JSON.stringify(state));
+    } catch (e) {}
+  }
+
+  function getLatestAdminMessage() {
+    for (let i = localMessages.length - 1; i >= 0; i--) {
+      const msg = localMessages[i];
+      if (isValidAdminReply(msg)) return msg;
+    }
+    return null;
+  }
+
+  function getLatestAdminMessageId() {
+    const msg = getLatestAdminMessage();
+    return msg ? msg.serverId : null;
+  }
+
+  function isValidAdminReply(msg) {
+    if (!msg.serverId) return false;
+    if (msg.sender !== 'admin') return false;
+    // Must have content or attachments
+    const hasContent = msg.content && msg.content.trim().length > 0;
+    const hasAttachments = msg.attachments && msg.attachments.length > 0;
+    return hasContent || hasAttachments;
+  }
+
+  function computeUnreadCount(state) {
+    var lastReadId = state.last_read_admin_id;
+    var lastReadCreatedAt = state.last_read_admin_created_at;
+    var baselineHadNoAdmin = !!state.baseline_had_no_admin;
+
+    // Baseline initialized with no admin messages — count ALL valid admin messages
+    if (baselineHadNoAdmin && !lastReadId) {
+      var count = 0;
+      var latestId = null;
+      for (var i = 0; i < localMessages.length; i++) {
+        if (isValidAdminReply(localMessages[i])) {
+          count++;
+          latestId = localMessages[i].serverId;
+        }
+      }
+      return { count: count, latestId: latestId };
+    }
+
+    if (!lastReadId) {
+      return { count: 0, latestId: null };
+    }
+
+    // Try to find the baseline message by ID
+    var pastBaseline = false;
+    var count = 0;
+    var latestId = null;
+
+    for (var i = 0; i < localMessages.length; i++) {
+      var msg = localMessages[i];
+      if (!msg.serverId) continue;
+
+      if (!pastBaseline) {
+        if (msg.serverId === lastReadId) {
+          pastBaseline = true;
+        }
+        continue;
+      }
+
+      if (isValidAdminReply(msg)) {
+        count++;
+        latestId = msg.serverId;
+      }
+    }
+
+    // Fallback: baseline ID not found in current history — use timestamp
+    if (!pastBaseline && lastReadCreatedAt) {
+      var baselineMs = toMs(lastReadCreatedAt);
+      count = 0;
+      latestId = null;
+      for (var i = 0; i < localMessages.length; i++) {
+        var msg = localMessages[i];
+        if (!msg.serverId || !msg.created_at) continue;
+        var msgMs = toMs(msg.created_at);
+        if (!msgMs || !baselineMs || msgMs <= baselineMs) continue;
+        if (isValidAdminReply(msg)) {
+          count++;
+          latestId = msg.serverId;
+        }
+      }
+    }
+
+    return { count: count, latestId: latestId };
+  }
+
+  function sendUnreadUpdate() {
+    if (!widgetEnabled) return;
+    var state = loadNotificationState();
+    if (!state || !state.initialized) return;
+
+    var result = computeUnreadCount(state);
+
+    postToParent({
+      source: 'primingo-support-chat',
+      type: 'primingo_support_unread',
+      unread_count: result.count,
+      latest_message_id: result.latestId
+    });
+  }
+
+  function clearUnreadState() {
+    var latestAdmin = getLatestAdminMessage();
+    var state = loadNotificationState() || { initialized: true };
+
+    if (latestAdmin) {
+      state.last_read_admin_id = latestAdmin.serverId;
+      state.last_read_admin_created_at = latestAdmin.created_at || null;
+      state.baseline_had_no_admin = false;
+    }
+    state.initialized = true;
+    saveNotificationState(state);
+
+    // Notify parent that unread is 0
+    postToParent({
+      source: 'primingo-support-chat',
+      type: 'primingo_support_unread',
+      unread_count: 0,
+      latest_message_id: null
+    });
+  }
+
+  function initializeNotificationBaseline() {
+    var state = loadNotificationState();
+    if (state && state.initialized) return; // Already initialized
+
+    // First load in this browser — set baseline to latest admin message
+    var latestAdmin = getLatestAdminMessage();
+    if (latestAdmin) {
+      saveNotificationState({
+        initialized: true,
+        baseline_had_no_admin: false,
+        last_read_admin_id: latestAdmin.serverId,
+        last_read_admin_created_at: latestAdmin.created_at || null
+      });
+    } else {
+      // No admin messages yet — flag so first future reply triggers unread
+      saveNotificationState({
+        initialized: true,
+        baseline_had_no_admin: true,
+        last_read_admin_id: null,
+        last_read_admin_created_at: null
+      });
+    }
+  }
+
+  function onHistoryUpdated() {
+    // Called after history is loaded/polled
+    var state = loadNotificationState();
+    if (!state || !state.initialized) {
+      initializeNotificationBaseline();
+      return;
+    }
+
+    if (widgetEnabled) {
+      // Wait for parent to confirm widget state before acting
+      if (!widgetStateKnown) return;
+
+      if (widgetIsOpen) {
+        // Widget is open — mark everything as read
+        clearUnreadState();
+        markAdminMessagesRead();
+      } else {
+        // Widget is closed — send unread count
+        sendUnreadUpdate();
+      }
+    }
+  }
+
   const TICK_SENT = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5L20 7"/></svg>';
   const TICK_DELIVERED = '<svg width="14" height="12" viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M2 12l5 5L17 7"/><path d="M8 12l5 5L23 7"/></svg>';
   const TICK_READ = '<svg width="14" height="12" viewBox="0 0 28 24" fill="none" stroke="#53bdeb" stroke-width="2.5"><path d="M2 12l5 5L17 7"/><path d="M8 12l5 5L23 7"/></svg>';
@@ -41,6 +290,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     messageInput.placeholder = 'Type your message...';
     sendBtn.disabled = false;
     document.getElementById('upload-btn').disabled = false;
+    document.getElementById('emoji-btn').disabled = false;
     messageInput.focus();
   }
 
@@ -227,6 +477,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const text = messageInput.value.trim();
     if (!text) return;
     messageInput.value = '';
+    closeEmojiPicker();
     const msg = addLocalMessage(text);
     messageQueue.push({ localId: msg.localId, content: msg.content });
     processQueue();
@@ -301,6 +552,85 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderAllMessages();
   });
 
+  // --- Emoji Picker ---
+  const EMOJI_LIST = [
+    '😀','😃','😄','😁','😂','😊','🙂','😉','😍','🥰',
+    '👍','👎','👌','✌️','🙏','👏','🙌','💪','👋','🤝',
+    '❤️','💙','💛','💚','🔥','✨','🎉','✅','❌','⚠️',
+    '💯','⭐','🚀','💡','📌','📎','🔒','🔑','📧','📱',
+    '💻','🛒','💳','🎁','⏳','📦','🧾','🛠️','🔄',
+    'ℹ️','❓','💬'
+  ];
+
+  const emojiBtn = document.getElementById('emoji-btn');
+  const emojiPicker = document.getElementById('emoji-picker');
+  const emojiGrid = document.getElementById('emoji-grid');
+  const emojiPickerClose = document.getElementById('emoji-picker-close');
+
+  // Populate emoji grid
+  EMOJI_LIST.forEach(emoji => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = emoji;
+    btn.setAttribute('aria-label', emoji);
+    btn.addEventListener('click', () => insertEmoji(emoji));
+    emojiGrid.appendChild(btn);
+  });
+
+  function insertEmoji(emoji) {
+    const start = messageInput.selectionStart || 0;
+    const end = messageInput.selectionEnd || 0;
+    const before = messageInput.value.substring(0, start);
+    const after = messageInput.value.substring(end);
+    messageInput.value = before + emoji + after;
+    const newPos = start + emoji.length;
+    messageInput.setSelectionRange(newPos, newPos);
+    messageInput.focus();
+    closeEmojiPicker();
+  }
+
+  function openEmojiPicker() {
+    emojiPicker.classList.remove('hidden');
+    emojiBtn.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeEmojiPicker() {
+    emojiPicker.classList.add('hidden');
+    emojiBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function toggleEmojiPicker() {
+    if (emojiPicker.classList.contains('hidden')) {
+      openEmojiPicker();
+    } else {
+      closeEmojiPicker();
+    }
+  }
+
+  emojiBtn.addEventListener('click', toggleEmojiPicker);
+  emojiPickerClose.addEventListener('click', () => {
+    closeEmojiPicker();
+    messageInput.focus();
+  });
+
+  // Close on Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !emojiPicker.classList.contains('hidden')) {
+      closeEmojiPicker();
+      messageInput.focus();
+    }
+  });
+
+  // Close when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!emojiPicker.classList.contains('hidden') &&
+        !emojiPicker.contains(e.target) &&
+        e.target !== emojiBtn &&
+        !emojiBtn.contains(e.target)) {
+      closeEmojiPicker();
+    }
+  });
+
   async function loadHistory() {
     if (!supportKey) return;
 
@@ -364,6 +694,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         sortMessages();
         renderAllMessages();
       }
+
+      onHistoryUpdated();
     } catch (err) {}
   }
 
@@ -399,6 +731,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function markAdminMessagesRead() {
     if (!supportKey) return;
     if (document.hidden) return;
+    // In widget mode, only mark read when widget is open
+    if (widgetEnabled && !widgetIsOpen) return;
 
     try {
       await fetch('/api/support/mark-read', {
@@ -441,6 +775,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     messagesArea.innerHTML = '';
     enableChat();
     await loadHistory();
+    initializeNotificationBaseline();
+    if (widgetEnabled && widgetStateKnown && widgetIsOpen) {
+      clearUnreadState();
+    }
     markAdminMessagesRead();
     startPolling();
   }

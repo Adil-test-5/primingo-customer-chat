@@ -692,3 +692,111 @@ body {
   font-size: 0.8rem;
   color: #c0392b;
 }
+
+/* Emoji Picker */
+.emoji-picker {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 8px;
+  width: 280px;
+  max-height: 260px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  border: 1px solid #e8eaed;
+  display: flex;
+  flex-direction: column;
+  z-index: 150;
+  overflow: hidden;
+}
+
+.emoji-picker.hidden {
+  display: none !important;
+}
+
+.emoji-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+.emoji-picker-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.emoji-picker-close {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  color: #666;
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.emoji-picker-close:hover {
+  background: #f0f2f5;
+  color: #333;
+}
+
+.emoji-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  padding: 10px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  flex: 1;
+  min-height: 0;
+}
+
+.emoji-picker-grid button {
+  width: 100%;
+  aspect-ratio: 1;
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.emoji-picker-grid button:hover {
+  background: #f0f2f5;
+}
+
+.emoji-picker-grid button:focus {
+  outline: 2px solid #213F91;
+  outline-offset: -2px;
+}
+
+/* Composer position context for emoji picker */
+.chat-composer {
+  position: relative;
+}
+
+@media (max-width: 768px) {
+  .emoji-picker {
+    width: calc(100% - 16px);
+    left: 8px;
+    right: 8px;
+    max-height: 220px;
+  }
+
+  .emoji-picker-grid {
+    grid-template-columns: repeat(7, 1fr);
+  }
+}
