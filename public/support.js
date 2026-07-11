@@ -208,6 +208,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       state.last_read_admin_id = latestAdmin.serverId;
       state.last_read_admin_created_at = latestAdmin.created_at || null;
       state.baseline_had_no_admin = false;
+    } else {
+      // No admin messages yet — preserve the baseline flag so future replies count
+      state.baseline_had_no_admin = true;
+      state.last_read_admin_id = null;
+      state.last_read_admin_created_at = null;
     }
     state.initialized = true;
     saveNotificationState(state);
