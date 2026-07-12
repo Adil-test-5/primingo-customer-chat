@@ -338,7 +338,7 @@ function buildLogoHtml() {
     const escaped = escapeHtml(logoUrl);
     return `<img src="${escaped}" alt="Primingo" style="height: 36px; max-width: 180px; display: block;" />`;
   }
-  return `<span style="font-size: 22px; font-weight: 700; color: #2563eb; letter-spacing: -0.5px;">Primingo</span>`;
+  return `<span style="font-size: 22px; font-weight: 700; color: #ffffff; letter-spacing: -0.5px;">Primingo</span>`;
 }
 
 const PRIVACY_NOTICE = 'For your privacy, sensitive details and attachments may not be shown in this email.';
@@ -383,10 +383,10 @@ async function sendNotificationEmail(job) {
         <!-- Yellow accent line -->
         <tr><td style="height: 4px; background-color: #fbbf24; font-size: 0; line-height: 0;">&nbsp;</td></tr>
         <!-- Header -->
-        <tr><td style="background-color: #ffffff; padding: 24px 32px; border-bottom: 1px solid #f3f4f6;">
+        <tr><td style="background-color: #1e3a8a; padding: 24px 32px;">
           <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td>${logoHtml}</td>
-            <td align="right" style="font-size: 13px; color: #6b7280;">Support</td>
+            <td style="vertical-align: middle;">${logoHtml}</td>
+            <td align="right" style="font-size: 13px; color: #e0e7ff; vertical-align: middle;">Support</td>
           </tr></table>
         </td></tr>
         <!-- Body -->
