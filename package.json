@@ -8,14 +8,14 @@
     "dev": "node server.js"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.758.0",
+    "@aws-sdk/client-s3": "3.1085.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "16.4.5",
-    "express": "4.21.0",
+    "express": "4.22.2",
     "multer": "2.2.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }

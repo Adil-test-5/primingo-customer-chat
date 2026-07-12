@@ -37,7 +37,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // --- Chatwoot Webhook (raw body needed for HMAC verification) ---
 
-app.post('/api/webhooks/chatwoot', express.raw({ type: 'application/json' }), async (req, res) => {
+app.post('/api/webhooks/chatwoot', express.raw({ type: 'application/json', limit: '1mb' }), async (req, res) => {
   const LOG = '[WEBHOOK]';
 
   // Signature verification
@@ -636,13 +636,23 @@ function verifySignedToken(token) {
   if (!secret) return null;
 
   try {
+    if (!token || typeof token !== 'string') return null;
+
     const parts = token.split('.');
     if (parts.length !== 2) return null;
 
     const [payloadB64, signature] = parts;
+
+    // Validate signature is valid SHA-256 hex (64 chars)
+    if (!signature || signature.length !== 64 || !/^[0-9a-f]{64}$/.test(signature)) return null;
+
     const expectedSig = crypto.createHmac('sha256', secret).update(payloadB64).digest('hex');
 
-    if (signature !== expectedSig) return null;
+    // Timing-safe comparison
+    const sigBuffer = Buffer.from(signature, 'hex');
+    const expectedBuffer = Buffer.from(expectedSig, 'hex');
+    if (sigBuffer.length !== expectedBuffer.length) return null;
+    if (!crypto.timingSafeEqual(sigBuffer, expectedBuffer)) return null;
 
     const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString('utf8'));
 
@@ -819,7 +829,46 @@ const SUPPORT_MIME_MAP = {
   png: 'image/png', webp: 'image/webp', pdf: 'application/pdf'
 };
 
-app.post('/api/support/upload', supportUpload.single('file'), async (req, res) => {
+// File signature validation for content-type verification
+const SUPPORT_MAGIC_BYTES = {
+  jpg: [Buffer.from([0xFF, 0xD8, 0xFF])],
+  jpeg: [Buffer.from([0xFF, 0xD8, 0xFF])],
+  png: [Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])],
+  webp: null,
+  pdf: [Buffer.from('%PDF')]
+};
+
+function validateSupportFileSignature(buffer, ext) {
+  if (!buffer || buffer.length < 12) return false;
+  const head = buffer.slice(0, 256).toString('utf8', 0, Math.min(buffer.length, 256)).toLowerCase();
+  if (head.includes('<svg') || head.includes('<!doctype') || head.includes('<html') || head.includes('<script')) {
+    return false;
+  }
+  if (ext === 'webp') {
+    return buffer.slice(0, 4).toString('ascii') === 'RIFF' &&
+           buffer.slice(8, 12).toString('ascii') === 'WEBP';
+  }
+  const expected = SUPPORT_MAGIC_BYTES[ext];
+  if (!expected) return false;
+  return expected.some(magic => buffer.slice(0, magic.length).equals(magic));
+}
+
+// Multer error handler for support uploads
+function handleSupportUploadError(err, req, res, next) {
+  if (err) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ status: 'error', message: 'File too large. Maximum size is 10MB.' });
+    }
+    if (err.code && err.code.startsWith('LIMIT_')) {
+      return res.status(400).json({ status: 'error', message: 'File upload rejected.' });
+    }
+    console.error('[SUPPORT UPLOAD ERROR]', err.message);
+    return res.status(500).json({ status: 'error', message: 'Upload failed. Please try again.' });
+  }
+  next();
+}
+
+app.post('/api/support/upload', supportUpload.single('file'), handleSupportUploadError, async (req, res) => {
   try {
     const supportKey = req.body.support_key;
     if (!supportKey) {
@@ -833,6 +882,11 @@ app.post('/api/support/upload', supportUpload.single('file'), async (req, res) =
     const ext = path.extname(req.file.originalname).toLowerCase().replace('.', '');
     if (!SUPPORT_ALLOWED_EXTS.has(ext)) {
       return res.status(400).json({ status: 'error', message: 'Only images (jpg, png, webp) and PDF files are allowed.' });
+    }
+
+    // Validate file signature — reject content/extension mismatches
+    if (!validateSupportFileSignature(req.file.buffer, ext)) {
+      return res.status(400).json({ status: 'error', message: 'File content does not match the expected type.' });
     }
 
     if (!process.env.R2_ENDPOINT || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET_NAME) {
@@ -873,9 +927,6 @@ app.post('/api/support/upload', supportUpload.single('file'), async (req, res) =
 
     res.json({ status: 'ok', url: fileUrl, filename: req.file.originalname });
   } catch (err) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ status: 'error', message: 'File too large. Maximum size is 10MB.' });
-    }
     console.error('[SUPPORT UPLOAD ERROR]', err.message);
     res.status(502).json({ status: 'error', message: 'Upload failed. Please try again.' });
   }

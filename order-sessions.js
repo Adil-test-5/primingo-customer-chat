@@ -25,7 +25,15 @@ function loadOrderSessions() {
 
 function saveOrderSessions(data) {
   ensureDataDir();
-  fs.writeFileSync(ORDER_SESSIONS_FILE, JSON.stringify(data, null, 2));
+  const tmpFile = ORDER_SESSIONS_FILE + '.tmp';
+  try {
+    fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2));
+    try { fs.chmodSync(tmpFile, 0o600); } catch (e) { /* unsupported on some platforms */ }
+    fs.renameSync(tmpFile, ORDER_SESSIONS_FILE);
+  } catch (err) {
+    try { fs.unlinkSync(tmpFile); } catch (e) { /* cleanup best-effort */ }
+    throw err;
+  }
 }
 
 function pruneExpired(data) {
@@ -93,10 +101,26 @@ function revokeOrderSessions(orderId, itemId) {
   return revoked;
 }
 
+function updateOrderSession(sessionId, updates) {
+  if (!sessionId) return false;
+  const data = pruneExpired(loadOrderSessions());
+  const session = data.sessions[sessionId];
+  if (!session) return false;
+  if (Date.now() > session.expires_at) {
+    delete data.sessions[sessionId];
+    saveOrderSessions(data);
+    return false;
+  }
+  Object.assign(session, updates);
+  saveOrderSessions(data);
+  return true;
+}
+
 module.exports = {
   isNonceUsed,
   markNonceUsed,
   createOrderSession,
   getOrderSession,
+  updateOrderSession,
   revokeOrderSessions
 };

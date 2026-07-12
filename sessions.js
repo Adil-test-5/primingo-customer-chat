@@ -17,7 +17,15 @@ function loadSessions() {
 
 function saveSessions(data) {
   ensureDataDir();
-  fs.writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
+  const tmpFile = SESSIONS_FILE + '.tmp';
+  try {
+    fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2));
+    try { fs.chmodSync(tmpFile, 0o600); } catch (e) { /* unsupported on some platforms */ }
+    fs.renameSync(tmpFile, SESSIONS_FILE);
+  } catch (err) {
+    try { fs.unlinkSync(tmpFile); } catch (e) { /* cleanup best-effort */ }
+    throw err;
+  }
 }
 
 function getSession(email) {
