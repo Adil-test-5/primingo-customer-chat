@@ -10,7 +10,8 @@ const CHATWOOT_ACCOUNT_ID = () => process.env.CHATWOOT_ACCOUNT_ID || '1';
 const CHATWOOT_INBOX_ID = () => process.env.CHATWOOT_INBOX_ID || '2';
 
 // --- Attachment cache (Chatwoot URL → R2 URL) ---
-const CACHE_FILE = path.join(__dirname, 'data', 'attachment-cache.json');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const CACHE_FILE = path.join(DATA_DIR, 'attachment-cache.json');
 
 function loadAttachmentCache() {
   try {
@@ -393,13 +394,14 @@ async function getConversationMeta(conversationId) {
   });
 
   if (!res.ok) {
-    return { agentRead: false, agentLastSeen: null };
+    return { agentRead: false, agentLastSeen: null, contactLastSeen: null };
   }
 
   const data = await res.json();
   const agentLastSeen = data.agent_last_seen_at || null;
   const agentRead = !!agentLastSeen;
-  return { agentRead, agentLastSeen };
+  const contactLastSeen = data.contact_last_seen_at || null;
+  return { agentRead, agentLastSeen, contactLastSeen };
 }
 
 async function findOrCreateSupportConversation(contactId, supportKey, contextData) {
@@ -485,4 +487,30 @@ async function sendSupportContext(conversationId, contextData) {
   });
 }
 
-module.exports = { findOrCreateContact, findOrCreateConversation, findOrCreateSupportConversation, sendOrderContext, sendSupportContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta };
+async function getConversationContact(conversationId) {
+  // Fetch the conversation and extract the contact's email/name
+  const res = await fetch(apiUrl(`/conversations/${conversationId}`), {
+    headers: headers()
+  });
+
+  if (!res.ok) return null;
+
+  const data = await res.json();
+  const contactId = data.meta?.sender?.id;
+  if (!contactId) return null;
+
+  // Fetch full contact details
+  const contactRes = await fetch(apiUrl(`/contacts/${contactId}`), {
+    headers: headers()
+  });
+
+  if (!contactRes.ok) return null;
+
+  const contact = await contactRes.json();
+  return {
+    email: contact.email || null,
+    name: contact.name || null
+  };
+}
+
+module.exports = { findOrCreateContact, findOrCreateConversation, findOrCreateSupportConversation, sendOrderContext, sendSupportContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta, getConversationContact };

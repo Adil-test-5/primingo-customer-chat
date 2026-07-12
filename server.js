@@ -8,6 +8,7 @@ const cookieParser = require('cookie-parser');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { findOrCreateContact, findOrCreateConversation, findOrCreateSupportConversation, sendOrderContext, sendSupportContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta } = require('./chatwoot');
 const { isNonceUsed, markNonceUsed, createOrderSession, getOrderSession, revokeOrderSessions } = require('./order-sessions');
+const { scheduleNotification, startProcessing } = require('./notification-jobs');
 const uploadRouter = require('./upload');
 
 const app = express();
@@ -33,6 +34,185 @@ app.use(cors({
 
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// --- Chatwoot Webhook (raw body needed for HMAC verification) ---
+
+app.post('/api/webhooks/chatwoot', express.raw({ type: 'application/json' }), async (req, res) => {
+  const LOG = '[WEBHOOK]';
+
+  // Signature verification
+  const secret = process.env.CHATWOOT_WEBHOOK_SECRET;
+  if (!secret) {
+    console.error(LOG, 'CHATWOOT_WEBHOOK_SECRET not configured');
+    return res.status(500).json({ status: 'error', message: 'Webhook not configured' });
+  }
+
+  const signature = req.headers['x-chatwoot-signature'];
+  const timestamp = req.headers['x-chatwoot-timestamp'];
+
+  if (!signature || !timestamp) {
+    return res.status(401).json({ status: 'error', message: 'Missing signature headers' });
+  }
+
+  // Reject timestamps older than 5 minutes
+  const tsAge = Math.abs(Date.now() - parseInt(timestamp, 10) * 1000);
+  if (isNaN(tsAge) || tsAge > 5 * 60 * 1000) {
+    return res.status(401).json({ status: 'error', message: 'Timestamp too old' });
+  }
+
+  // HMAC verification: sha256=HMAC-SHA256(secret, timestamp + "." + rawBody)
+  const rawBody = req.body;
+  const expectedSig = 'sha256=' + crypto.createHmac('sha256', secret)
+    .update(timestamp + '.' + rawBody.toString())
+    .digest('hex');
+
+  try {
+    const sigBuffer = Buffer.from(signature);
+    const expectedBuffer = Buffer.from(expectedSig);
+    if (sigBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
+      return res.status(401).json({ status: 'error', message: 'Invalid signature' });
+    }
+  } catch (err) {
+    return res.status(401).json({ status: 'error', message: 'Invalid signature' });
+  }
+
+  // Parse the verified body
+  let payload;
+  try {
+    payload = JSON.parse(rawBody.toString());
+  } catch (err) {
+    return res.status(400).json({ status: 'error', message: 'Invalid JSON' });
+  }
+
+  console.log(LOG, 'Received event:', payload.event);
+
+  // Only process: message_created + outgoing + public + general-support
+  if (payload.event !== 'message_created') {
+    return res.json({ status: 'ok', action: 'ignored' });
+  }
+
+  const message = payload;
+  const messageType = message.message_type;
+
+  // message_type: 0 = incoming, 1 = outgoing, 2 = activity, 3 = template
+  if (messageType !== 'outgoing' && messageType !== 1) {
+    return res.json({ status: 'ok', action: 'ignored', reason: 'not_outgoing' });
+  }
+
+  // Only public messages (private = internal notes)
+  if (message.private === true) {
+    return res.json({ status: 'ok', action: 'ignored', reason: 'private_note' });
+  }
+
+  // Must be a general-support conversation — never process order-chat
+  const conversation = message.conversation || {};
+  const conversationId = conversation.id;
+  let labels = conversation.labels || [];
+
+  // If labels are missing/empty in the payload, fetch from Chatwoot API
+  if (!labels.length && conversationId) {
+    try {
+      const { getConversationContact } = require('./chatwoot');
+      const cwBaseUrl = process.env.CHATWOOT_BASE_URL;
+      const cwAccountId = process.env.CHATWOOT_ACCOUNT_ID || '1';
+      const cwToken = process.env.CHATWOOT_API_TOKEN;
+      if (cwBaseUrl && cwToken) {
+        const convRes = await fetch(
+          `${cwBaseUrl}/api/v1/accounts/${cwAccountId}/conversations/${conversationId}`,
+          { headers: { 'Content-Type': 'application/json', 'api_access_token': cwToken } }
+        );
+        if (convRes.ok) {
+          const convData = await convRes.json();
+          labels = convData.labels || [];
+          console.log(LOG, 'Fetched labels from API:', labels);
+        }
+      }
+    } catch (err) {
+      console.error(LOG, 'Failed to fetch conversation labels:', err.message);
+    }
+  }
+
+  // Also look up the support key for this conversation
+  const supportKey = findSupportKeyByConversation(conversationId);
+
+  // Determine if this is a valid general-support conversation:
+  // 1. Has the "general-support" label, OR
+  // 2. Has a session key starting with support_customer_ or support_guest_
+  const hasGeneralSupportLabel = labels.includes('general-support');
+  const hasValidSupportKey = supportKey && (
+    supportKey.startsWith('support_customer_') || supportKey.startsWith('support_guest_')
+  );
+
+  // Explicitly reject order-chat conversations
+  if (labels.includes('order-chat') || (supportKey && !supportKey.startsWith('support_'))) {
+    return res.json({ status: 'ok', action: 'ignored', reason: 'order_chat_conversation' });
+  }
+
+  if (!hasGeneralSupportLabel && !hasValidSupportKey) {
+    return res.json({ status: 'ok', action: 'ignored', reason: 'not_general_support' });
+  }
+
+  // For outgoing messages, payload.sender is the AGENT — never use it as customer.
+  // Use conversation.meta.sender (the contact), then fall back to payload.contact.
+  const conversationMeta = conversation.meta || {};
+  const contactFromMeta = conversationMeta.sender || {};
+  const contactFromPayload = message.contact || {};
+  let customerEmail = contactFromMeta.email || contactFromPayload.email || null;
+  let customerName = contactFromMeta.name || contactFromPayload.name || 'Customer';
+
+  // If still no email, try fetching conversation details from Chatwoot
+  if (!customerEmail || !customerEmail.includes('@')) {
+    try {
+      const { getConversationContact } = require('./chatwoot');
+      const contactInfo = await getConversationContact(conversationId);
+      if (contactInfo && contactInfo.email) {
+        customerEmail = contactInfo.email;
+        customerName = contactInfo.name || customerName;
+      }
+    } catch (err) {
+      console.error(LOG, 'Failed to fetch contact details:', err.message);
+    }
+  }
+
+  if (!customerEmail || !customerEmail.includes('@')) {
+    return res.json({ status: 'ok', action: 'ignored', reason: 'no_customer_email' });
+  }
+
+  const messageId = message.id;
+  const messageCreatedAt = message.created_at; // Unix timestamp from Chatwoot
+  const deliveryId = req.headers['x-chatwoot-delivery'];
+
+  const scheduled = scheduleNotification({
+    conversationId,
+    supportKey,
+    messageId,
+    messageCreatedAt,
+    customerName,
+    customerEmail,
+    deliveryId
+  });
+
+  console.log(LOG, scheduled ? 'Job scheduled' : 'Job skipped (duplicate/cooldown)', 'conversation:', conversationId);
+  res.json({ status: 'ok', action: scheduled ? 'scheduled' : 'skipped' });
+});
+
+function findSupportKeyByConversation(conversationId) {
+  // Search sessions for one matching this conversation_id
+  try {
+    const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+    const sessionsFile = path.join(DATA_DIR, 'sessions.json');
+    const fs = require('fs');
+    if (!fs.existsSync(sessionsFile)) return null;
+    const data = JSON.parse(fs.readFileSync(sessionsFile, 'utf8'));
+    for (const key of Object.keys(data)) {
+      if (data[key].conversation_id === conversationId) return key;
+    }
+  } catch (err) {
+    // Non-critical — supportKey is optional for notification scheduling
+  }
+  return null;
+}
+
 app.use(express.json());
 app.use(uploadRouter);
 
@@ -703,4 +883,5 @@ app.post('/api/support/upload', supportUpload.single('file'), async (req, res) =
 
 app.listen(PORT, () => {
   console.log(`Primingo Chat running on port ${PORT}`);
+  startProcessing();
 });

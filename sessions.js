@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const SESSIONS_FILE = path.join(__dirname, 'data', 'sessions.json');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 
 function ensureDataDir() {
   const dir = path.dirname(SESSIONS_FILE);

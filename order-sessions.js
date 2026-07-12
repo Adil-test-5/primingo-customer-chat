@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const ORDER_SESSIONS_FILE = path.join(__dirname, 'data', 'order-sessions.json');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const ORDER_SESSIONS_FILE = path.join(DATA_DIR, 'order-sessions.json');
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
