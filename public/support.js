@@ -532,9 +532,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('support_key', supportKey);
 
-      const res = await fetch('/api/support/upload', { method: 'POST', body: formData });
+      const res = await fetch('/api/support/upload', {
+        method: 'POST',
+        headers: { 'X-Support-Key': supportKey },
+        body: formData
+      });
       const data = await res.json();
 
       if (res.ok && data.url) {
@@ -808,10 +811,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function verifyGuest(name, email) {
+    const website = document.getElementById('guest-website')?.value || '';
     const res = await fetch('/api/support/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email })
+      body: JSON.stringify({ name, email, website })
     });
 
     if (!res.ok) {

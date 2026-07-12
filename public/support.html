@@ -196,6 +196,12 @@
         <label for="guest-email">Email</label>
         <input type="email" id="guest-email" placeholder="your@email.com" required>
 
+        <!-- Honeypot — hidden from real users -->
+        <div aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;">
+          <label for="guest-website">Website</label>
+          <input type="text" id="guest-website" name="website" tabindex="-1" autocomplete="off">
+        </div>
+
         <button type="submit" class="action-btn primary">Continue as Guest</button>
       </form>
 

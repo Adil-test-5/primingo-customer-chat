@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const path = require('path');
 const multer = require('multer');
 const cookieParser = require('cookie-parser');
+const rateLimit = require('express-rate-limit');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { findOrCreateContact, findOrCreateConversation, findOrCreateSupportConversation, sendOrderContext, sendSupportContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta } = require('./chatwoot');
 const { isNonceUsed, markNonceUsed, createOrderSession, getOrderSession, revokeOrderSessions } = require('./order-sessions');
@@ -13,6 +14,9 @@ const uploadRouter = require('./upload');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Trust first proxy (Railway)
+app.set('trust proxy', 1);
 
 // CORS — env-driven with hardcoded fallback
 const DEFAULT_ORIGINS = [
@@ -28,12 +32,77 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 app.use(cors({
   origin: allowedOrigins,
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Support-Key'],
   credentials: true
 }));
 
 app.use(cookieParser());
+
+// --- Origin protection middleware ---
+// Rejects browser requests with unexpected Origin header.
+// Does not apply to: webhook, server-to-server (no Origin), or GET requests.
+function checkOrigin(req, res, next) {
+  const origin = req.headers.origin;
+  // No Origin header = server-to-server or same-origin navigation — allow
+  if (!origin) return next();
+  if (allowedOrigins.includes(origin)) return next();
+  return res.status(403).json({ status: 'error', message: 'Forbidden.' });
+}
+
 app.use(express.static(path.join(__dirname, 'public')));
+
+// --- Rate limiters ---
+
+// Helper: hash a session key for safe use in limiter keys
+function hashKey(key) {
+  if (!key) return 'none';
+  return crypto.createHash('sha256').update(key).digest('hex').slice(0, 16);
+}
+
+const guestVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => req.ip,
+  message: { status: 'error', message: 'Too many requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const supportMessageLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => `${req.ip}_${hashKey(req.body?.support_key)}`,
+  message: { status: 'error', message: 'Too many messages. Please wait a moment.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const orderMessageLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 40,
+  keyGenerator: (req) => `${req.ip}_${hashKey(req.cookies?.order_chat_session)}`,
+  message: { status: 'error', message: 'Too many messages. Please wait a moment.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const supportUploadLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => `${req.ip}_${hashKey(req.headers['x-support-key'])}`,
+  message: { status: 'error', message: 'Too many uploads. Please wait before uploading again.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const exchangeLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.ip,
+  message: { status: 'error', message: 'Too many requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
 
 // --- Chatwoot Webhook (raw body needed for HMAC verification) ---
 
@@ -281,7 +350,7 @@ function setOrderSessionCookie(res, sessionId) {
 
 // --- Order Chat Token Exchange ---
 
-app.post('/api/order-chat/exchange', async (req, res) => {
+app.post('/api/order-chat/exchange', checkOrigin, exchangeLimiter, async (req, res) => {
   const { token } = req.body;
 
   if (!token) {
@@ -421,7 +490,7 @@ app.get('/support', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'support.html'));
 });
 
-app.post('/api/session/verify', async (req, res) => {
+app.post('/api/session/verify', checkOrigin, exchangeLimiter, async (req, res) => {
   const { type, order_id, item_id, chat_token } = req.body;
 
   if (type === 'general') {
@@ -504,7 +573,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.post('/api/messages/send', async (req, res) => {
+app.post('/api/messages/send', checkOrigin, orderMessageLimiter, async (req, res) => {
   const { message, session_type, customer_email, customer_name, order_data } = req.body;
 
   if (!message || !message.trim()) {
@@ -670,8 +739,21 @@ function verifySignedToken(token) {
   }
 }
 
-app.post('/api/support/verify', async (req, res) => {
-  const { token, name, email } = req.body;
+// Conditional limiter: token uses exchange, guest uses stricter limit
+function supportVerifyLimiter(req, res, next) {
+  if (req.body?.token) {
+    return exchangeLimiter(req, res, next);
+  }
+  return guestVerifyLimiter(req, res, next);
+}
+
+app.post('/api/support/verify', checkOrigin, supportVerifyLimiter, async (req, res) => {
+  const { token, name, email, website } = req.body;
+
+  // Honeypot: hidden field filled = reject silently
+  if (website) {
+    return res.status(400).json({ status: 'error', message: 'Verification failed.' });
+  }
 
   let supportKey, customerName, customerEmail, customerId;
 
@@ -732,7 +814,7 @@ app.post('/api/support/verify', async (req, res) => {
   }
 });
 
-app.post('/api/support/send', async (req, res) => {
+app.post('/api/support/send', checkOrigin, supportMessageLimiter, async (req, res) => {
   const { message, support_key } = req.body;
 
   if (!message || !message.trim()) {
@@ -868,12 +950,26 @@ function handleSupportUploadError(err, req, res, next) {
   next();
 }
 
-app.post('/api/support/upload', supportUpload.single('file'), handleSupportUploadError, async (req, res) => {
+// Authentication middleware for support uploads (runs before Multer)
+function requireSupportUploadSession(req, res, next) {
+  const supportKey = req.headers['x-support-key'];
+  if (!supportKey) {
+    return res.status(401).json({ status: 'error', message: 'Support session not verified.' });
+  }
+
+  const session = getSession(supportKey);
+  if (!session || !session.conversation_id) {
+    return res.status(401).json({ status: 'error', message: 'Support session expired or invalid.' });
+  }
+
+  req.supportSession = session;
+  req.supportKey = supportKey;
+  next();
+}
+
+app.post('/api/support/upload', checkOrigin, requireSupportUploadSession, supportUploadLimiter, supportUpload.single('file'), handleSupportUploadError, async (req, res) => {
   try {
-    const supportKey = req.body.support_key;
-    if (!supportKey) {
-      return res.status(400).json({ status: 'error', message: 'Support session not verified.' });
-    }
+    const session = req.supportSession;
 
     if (!req.file) {
       return res.status(400).json({ status: 'error', message: 'No file provided.' });
@@ -891,11 +987,6 @@ app.post('/api/support/upload', supportUpload.single('file'), handleSupportUploa
 
     if (!process.env.R2_ENDPOINT || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET_NAME) {
       return res.status(500).json({ status: 'error', message: 'File upload service not configured.' });
-    }
-
-    const session = getSession(supportKey);
-    if (!session?.conversation_id) {
-      return res.status(400).json({ status: 'error', message: 'Support session not found.' });
     }
 
     const now = new Date();

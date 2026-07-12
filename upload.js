@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { getOrderSession, updateOrderSession } = require('./order-sessions');
 const { findOrCreateContact, findOrCreateConversation, sendMessage } = require('./chatwoot');
@@ -112,12 +113,28 @@ function handleMulterError(err, req, res, next) {
   next();
 }
 
+// --- Rate limiter for order uploads ---
+
+const orderUploadLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => {
+    const cookieHash = req.cookies?.order_chat_session
+      ? crypto.createHash('sha256').update(req.cookies.order_chat_session).digest('hex').slice(0, 16)
+      : 'none';
+    return `${req.ip}_${cookieHash}`;
+  },
+  message: { status: 'error', message: 'Too many uploads. Please wait before uploading again.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
 // --- Route ---
 // Handles order-chat uploads only.
 // Support uploads use /api/support/upload in server.js.
 // Auth: order_chat_session HttpOnly cookie (set by /api/order-chat/exchange and legacy /api/session/verify).
 
-router.post('/api/upload', requireOrderUploadSession, upload.single('file'), handleMulterError, async (req, res) => {
+router.post('/api/upload', requireOrderUploadSession, orderUploadLimiter, upload.single('file'), handleMulterError, async (req, res) => {
   try {
     const orderSession = req.orderSession;
     const orderSessionId = req.orderSessionId;
