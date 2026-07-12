@@ -513,4 +513,89 @@ async function getConversationContact(conversationId) {
   };
 }
 
-module.exports = { findOrCreateContact, findOrCreateConversation, findOrCreateSupportConversation, sendOrderContext, sendSupportContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta, getConversationContact };
+module.exports = { findOrCreateContact, findOrCreateConversation, findOrCreateSupportConversation, sendOrderContext, sendSupportContext, sendMessage, getMessages, getSession, saveSession, markConversationRead, getConversationMeta, getConversationContact, getEmailPreviewMessages };
+
+// --- Lightweight message fetch for email previews (no attachment processing, no content logging) ---
+
+async function getEmailPreviewMessages(conversationId) {
+  const res = await fetch(apiUrl(`/conversations/${conversationId}/messages`), {
+    headers: headers()
+  });
+
+  if (!res.ok) {
+    throw new Error('Failed to fetch messages for email preview');
+  }
+
+  const data = await res.json();
+  const messages = data.payload || [];
+
+  const filtered = messages.filter(m => {
+    // Only incoming (0) or outgoing (1)
+    const mt = m.message_type;
+    if (mt !== 0 && mt !== 1 && mt !== 'incoming' && mt !== 'outgoing') return false;
+
+    // Exclude private notes
+    if (m.private) return false;
+
+    // Exclude deleted messages (multiple indicators)
+    if (m.content_attributes?.deleted) return false;
+    if (m.deleted_at) return false;
+    if (m.status === 'deleted') return false;
+    if (m.content_type === 'deleted') return false;
+
+    // Exclude activity/template/system
+    if (mt === 2 || mt === 3 || mt === 'activity' || mt === 'template') return false;
+
+    // Must have content or attachments
+    const content = String(m.content || '');
+    const hasContent = content.trim().length > 0;
+    const hasAttachments = m.attachments && m.attachments.length > 0;
+    if (!hasContent && !hasAttachments) return false;
+
+    // Skip context messages
+    if (hasContent) {
+      if (content.startsWith('--- Order Context ---')) return false;
+      if (content.startsWith('--- General Support Chat ---')) return false;
+      const lower = content.toLowerCase();
+      if (/^conversation was /.test(lower)) return false;
+      if (/^(assigned to|status changed|snoozed until|resolved by|reopened by)/.test(lower)) return false;
+    }
+
+    return true;
+  });
+
+  // Sort by created_at ascending
+  filtered.sort((a, b) => {
+    if (a.created_at !== b.created_at) return a.created_at - b.created_at;
+    return a.id - b.id;
+  });
+
+  // Take only the latest 5
+  const recent = filtered.slice(-5);
+
+  return recent.map(m => {
+    const mt = m.message_type;
+    const sender = (mt === 0 || mt === 'incoming') ? 'customer' : 'admin';
+
+    // Determine attachment types without logging URLs or filenames
+    let attachmentTypes = [];
+    if (m.attachments && m.attachments.length > 0) {
+      for (const att of m.attachments) {
+        const ft = (att.file_type || '').toLowerCase();
+        const ct = (att.content_type || '').toLowerCase();
+        if (ft === 'image' || ct.startsWith('image/')) {
+          if (!attachmentTypes.includes('image')) attachmentTypes.push('image');
+        } else {
+          if (!attachmentTypes.includes('file')) attachmentTypes.push('file');
+        }
+      }
+    }
+
+    return {
+      sender,
+      content: m.content || '',
+      created_at: m.created_at,
+      attachmentTypes
+    };
+  });
+}

@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { sendEmail } = require('./email-provider');
 const { getSession } = require('./sessions');
+const { getEmailPreviewMessages } = require('./chatwoot');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const JOBS_FILE = path.join(DATA_DIR, 'notification-jobs.json');
@@ -176,28 +177,239 @@ async function hasCustomerRead(job) {
   }
 }
 
+// --- Message Security ---
+
+const SENSITIVE_PATTERNS = [
+  /\bpassword\b/i,
+  /\bpasscode\b/i,
+  /\bPIN\b/,
+  /\botp\b/i,
+  /\bverification[_\s-]?code\b/i,
+  /\blogin[_\s-]?code\b/i,
+  /\brecovery[_\s-]?code\b/i,
+  /\bBearer\s+\S/i,
+  /\beyJ[A-Za-z0-9_-]{10,}/,                   // JWT
+  /\bsk[-_][A-Za-z0-9]{16,}/,                   // sk- style API keys
+  /\bapi[_-]?key\s*[:=]/i,
+  /\bsecret\s*[:=]/i,
+  /\bauthorization\s*[:=]/i,
+  /\bcookie\s*[:=]/i,
+  /\bsession[_-]?id\s*[:=]/i,
+  /\baccess[_-]?token\s*[:=]/i,
+  /\btoken\s*[:=]/i,                            // generic token: or token=
+  /\brefresh[_-]?token\s*[:=]/i,               // refresh_token:
+  /\bauth[_-]?token\s*[:=]/i,                  // auth_token:
+  /\b[A-Fa-f0-9]{32,}\b/,                       // Hex tokens (32+ chars)
+  /\b[A-Za-z0-9+/=]{40,}\b/,                    // Long base64 tokens
+  /\b\d{6}\b/,                                   // 6-digit OTP codes
+  /^\s*\d{4,8}\s*$/,                             // Standalone 4-8 digit number
+];
+
+function containsSensitiveContent(text) {
+  for (const pattern of SENSITIVE_PATTERNS) {
+    if (pattern.test(text)) return true;
+  }
+  return false;
+}
+
+function sanitizeMessageContent(content) {
+  const text = String(content || '');
+  if (!text.trim()) return '';
+
+  // If any sensitive pattern matches, replace the entire message
+  if (containsSensitiveContent(text)) {
+    return '[Hidden for security]';
+  }
+
+  // Strip any URLs that look like attachment links
+  let sanitized = text.replace(/https?:\/\/\S+/gi, '[Link removed]');
+
+  // Truncate to 300 characters
+  if (sanitized.length > 300) {
+    sanitized = sanitized.slice(0, 297) + '...';
+  }
+
+  return sanitized;
+}
+
+// --- Conversation Preview ---
+
+async function fetchConversationPreview(conversationId) {
+  try {
+    const messages = await getEmailPreviewMessages(conversationId);
+    if (!messages || !messages.length) return [];
+    return messages;
+  } catch (err) {
+    // Fail silently — fallback to email without preview
+    console.error(LOG_PREFIX, 'Preview fetch failed for conversation:', conversationId);
+    return [];
+  }
+}
+
+// --- URL Validation ---
+
+const ALLOWED_BUTTON_HOSTS = ['chat.primingo.com', 'primingo.com', 'www.primingo.com'];
+const ALLOWED_LOGO_HOSTS = ['primingo.com', 'www.primingo.com', 'chat-files.primingo.com'];
+const FALLBACK_BUTTON_URL = 'https://chat.primingo.com/support';
+
+function validateUrl(raw, allowedHosts) {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'https:') return null;
+    if (parsed.username || parsed.password) return null;
+    if (!allowedHosts.includes(parsed.hostname)) return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+function getSupportButtonUrl() {
+  const url = process.env.SUPPORT_EMAIL_BUTTON_URL;
+  if (!url) return FALLBACK_BUTTON_URL;
+  return validateUrl(url, ALLOWED_BUTTON_HOSTS) || FALLBACK_BUTTON_URL;
+}
+
+function getLogoUrl() {
+  const url = process.env.EMAIL_LOGO_URL;
+  if (!url) return null;
+  return validateUrl(url, ALLOWED_LOGO_HOSTS);
+}
+
 // --- Email Content ---
 
-function sendNotificationEmail(job) {
-  const name = job.customerName || 'there';
-  const subject = 'You have a new reply from Primingo Support';
+function getAttachmentLabel(attachmentTypes) {
+  if (!attachmentTypes || !attachmentTypes.length) return '';
+  const labels = [];
+  if (attachmentTypes.includes('image')) labels.push('Image attached');
+  if (attachmentTypes.includes('file')) labels.push('File attached');
+  return labels.join(' · ');
+}
 
-  const htmlContent = `
-<!DOCTYPE html>
+function buildPreviewHtml(messages, customerName) {
+  if (!messages.length) return '';
+
+  let html = `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 16px 0 24px 0;">
+    <tr><td style="padding: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #374151;">Recent conversation</td></tr>`;
+
+  const lastAdminIdx = messages.reduce((acc, m, i) => m.sender === 'admin' ? i : acc, -1);
+
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    const isAdmin = m.sender === 'admin';
+    const isLatestAdmin = i === lastAdminIdx;
+
+    let displayContent = sanitizeMessageContent(m.content);
+    const attachLabel = getAttachmentLabel(m.attachmentTypes);
+
+    if (!displayContent && attachLabel) {
+      displayContent = attachLabel;
+    } else if (displayContent && attachLabel) {
+      displayContent += ` [${attachLabel}]`;
+    }
+
+    if (!displayContent) continue;
+
+    const escapedContent = escapeHtml(displayContent);
+    const label = isAdmin ? 'Primingo Support' : escapeHtml(customerName || 'Customer');
+
+    if (isAdmin) {
+      const bgColor = isLatestAdmin ? '#dbeafe' : '#eff6ff';
+      const borderColor = isLatestAdmin ? '#93c5fd' : '#dbeafe';
+      html += `<tr><td align="right" style="padding: 4px 0;">
+        <table cellpadding="0" cellspacing="0" border="0" style="margin-left: auto;"><tr><td style="padding: 0 0 2px 0; font-size: 11px; color: #6b7280; text-align: right;">${label}</td></tr>
+        <tr><td style="background-color: ${bgColor}; border: 1px solid ${borderColor}; border-radius: 8px; padding: 10px 14px; font-size: 14px; color: #1f2937; max-width: 400px; text-align: left;">${escapedContent}</td></tr></table>
+      </td></tr>`;
+    } else {
+      html += `<tr><td align="left" style="padding: 4px 0;">
+        <table cellpadding="0" cellspacing="0" border="0"><tr><td style="padding: 0 0 2px 0; font-size: 11px; color: #6b7280;">${label}</td></tr>
+        <tr><td style="background-color: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 14px; font-size: 14px; color: #1f2937; max-width: 400px;">${escapedContent}</td></tr></table>
+      </td></tr>`;
+    }
+  }
+
+  html += `</table>`;
+  return html;
+}
+
+function buildLogoHtml() {
+  const logoUrl = getLogoUrl();
+  if (logoUrl) {
+    const escaped = escapeHtml(logoUrl);
+    return `<img src="${escaped}" alt="Primingo" style="height: 32px; max-width: 160px; display: block;" />`;
+  }
+  return `<span style="font-size: 22px; font-weight: 700; color: #2563eb; letter-spacing: -0.5px;">Primingo</span>`;
+}
+
+const PRIVACY_NOTICE = 'For your privacy, sensitive details and attachments may not be shown in this email.';
+
+async function sendNotificationEmail(job) {
+  const name = String(job.customerName || 'there');
+  const subject = 'You have a new reply from Primingo Support';
+  const buttonUrl = getSupportButtonUrl();
+
+  // Fetch conversation preview (fail gracefully)
+  let previewHtml = '';
+  let previewText = '';
+  try {
+    const messages = await fetchConversationPreview(job.conversationId);
+    if (messages.length) {
+      previewHtml = buildPreviewHtml(messages, job.customerName);
+      previewText = '\n---\nRecent conversation:\n' + messages.map(m => {
+        const label = m.sender === 'admin' ? 'Primingo Support' : (job.customerName || 'Customer');
+        let content = sanitizeMessageContent(m.content);
+        const attachLabel = getAttachmentLabel(m.attachmentTypes);
+        if (!content && attachLabel) {
+          content = attachLabel;
+        } else if (content && attachLabel) {
+          content += ` [${attachLabel}]`;
+        }
+        return `${label}: ${content || ''}`;
+      }).join('\n') + '\n---\n';
+    }
+  } catch (err) {
+    // Send without preview — don't break the notification
+  }
+
+  const logoHtml = buildLogoHtml();
+
+  const htmlContent = `<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
-  <p>Hi ${escapeHtml(name)},</p>
-  <p>Our support team has replied to your conversation.</p>
-  <p style="margin: 30px 0;">
-    <a href="https://primingo.com/" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; border-radius: 6px; text-decoration: none; display: inline-block; font-weight: 500;">Open Primingo Support</a>
-  </p>
-  <p style="color: #666; font-size: 14px;">If you have any questions, just reply to this email.</p>
-  <p style="color: #999; font-size: 12px; margin-top: 40px;">Primingo Support</p>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; padding: 32px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+        <!-- Header -->
+        <tr><td style="background-color: #ffffff; padding: 24px 32px; border-bottom: 1px solid #f3f4f6;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td>${logoHtml}</td>
+            <td align="right" style="font-size: 13px; color: #6b7280;">Support</td>
+          </tr></table>
+        </td></tr>
+        <!-- Body -->
+        <tr><td style="padding: 32px;">
+          <p style="margin: 0 0 16px 0; font-size: 16px; color: #1f2937;">Hi ${escapeHtml(name)},</p>
+          <p style="margin: 0 0 24px 0; font-size: 15px; color: #4b5563; line-height: 1.5;">Our support team has replied to your conversation.</p>
+          ${previewHtml}
+          <table cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0;"><tr><td style="background-color: #2563eb; border-radius: 8px;">
+            <a href="${escapeHtml(buttonUrl)}" style="display: inline-block; padding: 14px 28px; color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none;">Open Primingo Support</a>
+          </td></tr></table>
+          <p style="margin: 16px 0 0 0; font-size: 12px; color: #9ca3af; line-height: 1.4;">${escapeHtml(PRIVACY_NOTICE)}</p>
+        </td></tr>
+        <!-- Footer -->
+        <tr><td style="padding: 24px 32px; border-top: 1px solid #f3f4f6; background-color: #fafafa;">
+          <p style="margin: 0 0 4px 0; font-size: 13px; color: #6b7280; font-weight: 500;">Primingo Support</p>
+          <p style="margin: 0 0 4px 0; font-size: 12px; color: #9ca3af;">Secure digital subscriptions and customer assistance</p>
+          <p style="margin: 0; font-size: 12px;"><a href="https://primingo.com" style="color: #2563eb; text-decoration: none;">primingo.com</a></p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
 </body>
 </html>`;
 
-  const textContent = `Hi ${name},\n\nOur support team has replied to your conversation.\n\nOpen Primingo Support to view the reply:\nhttps://primingo.com/\n\nPrimingo Support`;
+  const textContent = `Hi ${name},\n\nOur support team has replied to your conversation.\n${previewText}\nOpen Primingo Support to view the reply:\n${buttonUrl}\n\n${PRIVACY_NOTICE}\n\nPrimingo Support\nSecure digital subscriptions and customer assistance\nprimingo.com`;
 
   return sendEmail({
     to: job.customerEmail,
@@ -210,7 +422,8 @@ function sendNotificationEmail(job) {
 }
 
 function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // --- Timer ---
